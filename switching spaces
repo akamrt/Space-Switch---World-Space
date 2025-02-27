@@ -1,0 +1,1069 @@
+import sys, re
+try:
+    from Qt import QtWidgets, QtGui, QtCore
+except ImportError:
+    try:
+        from PySide2 import QtWidgets, QtGui, QtCore
+    except ImportError:
+        from PyQt5 import QtWidgets, QtGui, QtCore
+
+import maya.cmds as cmds
+
+# ----------------------------------------------------
+# Helper: Create a colored circular icon (unused now)
+# ----------------------------------------------------
+def create_color_icon(color, size=16):
+    pixmap = QtGui.QPixmap(size, size)
+    pixmap.fill(QtCore.Qt.transparent)
+    painter = QtGui.QPainter(pixmap)
+    painter.setRenderHint(QtGui.QPainter.Antialiasing)
+    painter.setBrush(QtGui.QBrush(QtGui.QColor(color)))
+    painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
+    painter.drawEllipse(0, 0, size - 1, size - 1)
+    painter.end()
+    return QtGui.QIcon(pixmap)
+
+# ----------------------------------------------------
+# Define a Dark Theme Color Palette
+# ----------------------------------------------------
+HIGHLIGHT_LOCATOR    = "#4DD0E1"  # Light Cyan for locators
+HIGHLIGHT_GEOMETRY   = "#AED581"  # Light Green for geometry (meshes)
+HIGHLIGHT_CURVE      = "#FFB74D"  # Soft Orange for curves (nurbs curves)
+HIGHLIGHT_DEFAULT    = "#B0BEC5"  # Light Blue-Grey for defaults
+HIGHLIGHT_CONSTRAINT = "#FF5252"  # Bright Red for constraints
+
+# ----------------------------------------------------
+# Helper functions for constraint naming and creation
+# ----------------------------------------------------
+def get_next_group_id():
+    """Get the next available group ID based on existing constraints."""
+    existing_groups = []
+    all_constraints = cmds.ls(type=["pointConstraint", "orientConstraint", "parentConstraint"]) or []
+    for constraint in all_constraints:
+        match = re.search(r'bulk_ID_(\d+)_', constraint)
+        if match:
+            existing_groups.append(int(match.group(1)))
+    if not existing_groups:
+        return 1
+    return max(existing_groups) + 1
+
+def get_next_constraint_number(group_id):
+    """Get the next available constraint number within a group."""
+    existing_numbers = []
+    pattern = f"bulk_ID_{group_id}_(\\d+)$"
+    all_constraints = cmds.ls(type=["pointConstraint", "orientConstraint", "parentConstraint"]) or []
+    for constraint in all_constraints:
+        match = re.search(pattern, constraint)
+        if match:
+            existing_numbers.append(int(match.group(1)))
+    if not existing_numbers:
+        return 1
+    return max(existing_numbers) + 1
+
+def createSafeParentConstraint(source, target, name, maintainOffset=False):
+    """
+    Create a parent constraint from source to target.
+    Checks target's translate and rotate channels; if any channel does not exist or is locked,
+    that channel is skipped. The constraint is created with the given name.
+    """
+    skip_translate = []
+    skip_rotate = []
+    for axis in ["X", "Y", "Z"]:
+        attr_trans = f"{target}.translate{axis}"
+        if (not cmds.objExists(attr_trans)) or cmds.getAttr(attr_trans, lock=True):
+            skip_translate.append(axis.lower())
+    for axis in ["X", "Y", "Z"]:
+        attr_rot = f"{target}.rotate{axis}"
+        if (not cmds.objExists(attr_rot)) or cmds.getAttr(attr_rot, lock=True):
+            skip_rotate.append(axis.lower())
+    constraint = cmds.parentConstraint(source, target, maintainOffset=maintainOffset,
+                                         skipTranslate=skip_translate, skipRotate=skip_rotate,
+                                         name=name)[0]
+    return constraint
+
+def cleanup_locator(locator):
+    """
+    Thorough cleanup of animation curves, focusing especially on static channels:
+    1. Apply Euler filtering on rotation channels
+    2. Identify and completely remove static channels (set to static value)
+    3. Remove redundant keys from varying channels
+    4. Supports translation, rotation, scale, and visibility channels
+    """
+    print(f"\nCleaning up animation on: {locator}")
+
+    # Apply Euler filtering on rotation channels
+    try:
+        cmds.filterCurve(f"{locator}.rotateX", f"{locator}.rotateY", f"{locator}.rotateZ")
+    except Exception as e:
+        print(f"filterCurve failed on {locator}: {e}")
+
+    # Expanded list of channels to clean up
+    channels = [
+        "translateX", "translateY", "translateZ",
+        "rotateX", "rotateY", "rotateZ",
+        "scaleX", "scaleY", "scaleZ",
+        "visibility"
+    ]
+
+    for attr in channels:
+        full_attr = f"{locator}.{attr}"
+
+        # Check if attribute exists
+        if not cmds.objExists(full_attr):
+            continue
+
+        # Check if attribute has keyframes
+        keyCount = cmds.keyframe(full_attr, query=True, keyframeCount=True)
+        if not keyCount or keyCount == 0:
+            print(f"  {attr}: No keyframes found")
+            continue
+
+        # Get all keyframe times and values
+        times = cmds.keyframe(full_attr, query=True, timeChange=True)
+        values = cmds.keyframe(full_attr, query=True, valueChange=True)
+
+        if not times or not values:
+            print(f"  {attr}: No keyframe data available")
+            continue
+
+        print(f"  {attr}: Found {len(times)} keyframes")
+
+        # Check if channel is static (all values are the same)
+        # Use a more generous tolerance for floating point comparison
+        tolerance = 0.0001
+
+        # Special handling for boolean attributes like visibility
+        if attr == "visibility":
+            # In Maya, visibility is often either 0 or 1
+            rounded_values = [round(v) for v in values]
+        else:
+            # Round regular values to 6 decimal places to handle floating point imprecision
+            rounded_values = [round(v, 6) for v in values]
+
+        # If all values are the same, remove all keys and set the attribute value
+        if len(set(rounded_values)) == 1:
+            print(f"  {attr}: Static channel detected with value {values[0]} - removing all keys")
+            cmds.cutKey(full_attr, clear=True)
+            try:
+                # For visibility, ensure we set an integer value (0 or 1)
+                if attr == "visibility":
+                    cmds.setAttr(full_attr, int(round(values[0])))
+                else:
+                    cmds.setAttr(full_attr, values[0])
+                print(f"  {attr}: Set to static value {values[0]}")
+            except Exception as e:
+                print(f"  {attr}: Failed to set static value: {e}")
+            continue
+
+        # Check for segments of static values and remove unnecessary keys
+        to_remove = []
+        last_value = None
+
+        for i, (t, v) in enumerate(zip(times, values)):
+            if i > 0 and abs(v - last_value) < tolerance:
+                # Middle of a static segment
+                if i < len(times) - 1:  # Don't remove last key of a segment
+                    to_remove.append(t)
+            last_value = v
+
+        # Remove redundant keys in static segments
+        if to_remove:
+            for t in to_remove:
+                cmds.cutKey(full_attr, time=(t, t), clear=True)
+            print(f"  {attr}: Removed {len(to_remove)} redundant keys from static segments")
+
+        # Now check for redundant linear keys
+        # Re-get the keyframes after previous cleanup
+        times = cmds.keyframe(full_attr, query=True, timeChange=True) or []
+        values = cmds.keyframe(full_attr, query=True, valueChange=True) or []
+
+        if len(times) >= 3:
+            linear_keys = []
+
+            for i in range(1, len(times)-1):
+                # Check if middle key is on a straight line between neighbors
+                t0, t1, t2 = times[i-1], times[i], times[i+1]
+                v0, v1, v2 = values[i-1], values[i], values[i+1]
+
+                # Calculate the expected value if the curve was linear
+                ratio = (t1 - t0) / (t2 - t0)
+                expected = v0 + ratio * (v2 - v0)
+
+                # If close enough to expected, this key is redundant
+                if abs(v1 - expected) < tolerance:
+                    linear_keys.append(t1)
+
+            if linear_keys:
+                for t in linear_keys:
+                    cmds.cutKey(full_attr, time=(t, t), clear=True)
+                print(f"  {attr}: Removed {len(linear_keys)} redundant linear keys")
+
+def get_constraint_objects(constraint):
+    """
+    Return a tuple (target, constrained objects) for a given constraint.
+    If the target (typically the baked locator) is parented under a manual root locator,
+    that manual root locator is also added.
+    """
+    target = cmds.listConnections(f"{constraint}.target[0].targetParentMatrix")
+    constrained = cmds.listConnections(f"{constraint}.constraintParentInverseMatrix")
+    if target:
+        new_target = list(target)
+        for t in target:
+            parents = cmds.listRelatives(t, parent=True) or []
+            for p in parents:
+                if "_manualRoot_locator" in p and p not in new_target:
+                    new_target.append(p)
+        target = new_target
+    return target, constrained
+
+# ----------------------------------------------------
+# New helper: Determine a highlight colour based on object type
+# ----------------------------------------------------
+def get_highlight_color_for_object(obj):
+    shapes = cmds.listRelatives(obj, shapes=True) or []
+    if shapes:
+        shape_type = cmds.nodeType(shapes[0])
+        if shape_type == "locator":
+            return QtGui.QColor(HIGHLIGHT_LOCATOR)
+        elif shape_type == "mesh":
+            return QtGui.QColor(HIGHLIGHT_GEOMETRY)
+        elif shape_type == "nurbsCurve":
+            return QtGui.QColor(HIGHLIGHT_CURVE)
+    if "_locator" in obj.lower():
+        return QtGui.QColor(HIGHLIGHT_LOCATOR)
+    return QtGui.QColor(HIGHLIGHT_DEFAULT)
+
+# ====================================================
+# Main UI class: Combines bake workflows, a hierarchical constraint group tree,
+# drop‑down selection, a delete button to remove groups, and animated elements.
+# ====================================================
+class SpaceSwitchConverter(QtWidgets.QWidget):
+    def __init__(self):
+        super(SpaceSwitchConverter, self).__init__()
+        self.manualRootScriptJob = None
+        self.manualRootLocator = None
+        self.bakingCounter = 0
+        self.statusTimer = QtCore.QTimer()
+        self.statusTimer.timeout.connect(self.update_status_animation)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("Space Switch - World Space")
+        main_layout = QtWidgets.QVBoxLayout()
+
+        instruction_label = QtWidgets.QLabel(
+            "Select objects and choose a bake method.\n"
+            "For constraints, the target is the last selected object."
+        )
+        main_layout.addWidget(instruction_label)
+
+        chain_widget = QtWidgets.QWidget()
+        chain_layout = QtWidgets.QHBoxLayout(chain_widget)
+        chain_layout.setContentsMargins(0, 0, 0, 0)
+        chain_label = QtWidgets.QLabel("Chain Count:")
+        chain_layout.addWidget(chain_label)
+        self.chainCountSpin = QtWidgets.QSpinBox()
+        self.chainCountSpin.setMinimum(1)
+        self.chainCountSpin.setMaximum(99)
+        self.chainCountSpin.setValue(1)
+        self.chainCountSpin.setFixedWidth(40)
+        chain_layout.addWidget(self.chainCountSpin)
+        chain_layout.addStretch()
+        main_layout.addWidget(chain_widget)
+
+        self.convert_btn = QtWidgets.QPushButton("Bake to Locator (World Space)")
+        self.hierarchy_btn = QtWidgets.QPushButton("Bake with Hierarchy (First vs Last)")
+        self.manual_root_btn = QtWidgets.QPushButton("Bake with Manual Root")
+        self.camera_space_btn = QtWidgets.QPushButton("Bake to Camera Space")
+        self.bake_cleanup_btn = QtWidgets.QPushButton("Bake & Cleanup Selected")
+        main_layout.addWidget(self.convert_btn)
+        main_layout.addWidget(self.hierarchy_btn)
+        main_layout.addWidget(self.manual_root_btn)
+        main_layout.addWidget(self.camera_space_btn)
+        main_layout.addWidget(self.bake_cleanup_btn)
+
+        self.statusLabel = QtWidgets.QLabel("Status: Idle")
+        font = self.statusLabel.font()
+        font.setBold(True)
+        self.statusLabel.setFont(font)
+        main_layout.addWidget(self.statusLabel)
+
+        self.constraint_tree = QtWidgets.QTreeWidget()
+        self.constraint_tree.setHeaderLabel("Constraint Groups")
+        main_layout.addWidget(self.constraint_tree)
+        # FIX: Use lambda to create a proper connection to avoid AttributeError
+        self.constraint_tree.itemClicked.connect(lambda item, column: self.on_tree_item_clicked(item, column))
+
+        drop_layout = QtWidgets.QHBoxLayout()
+        self.refresh_btn = QtWidgets.QPushButton("Refresh Constraint List")
+        self.select_mode_combo = QtWidgets.QComboBox()
+        self.select_mode_combo.addItems(["Constraints", "Objects"])
+        self.select_btn = QtWidgets.QPushButton("Select from Group")
+        drop_layout.addWidget(self.refresh_btn)
+        drop_layout.addWidget(QtWidgets.QLabel("Select Mode:"))
+        drop_layout.addWidget(self.select_mode_combo)
+        drop_layout.addWidget(self.select_btn)
+        main_layout.addLayout(drop_layout)
+
+        self.delete_group_btn = QtWidgets.QPushButton("Delete Selected Group")
+        main_layout.addWidget(self.delete_group_btn)
+
+        self.setLayout(main_layout)
+        self.create_connections()
+
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #2E2E2E;
+                color: #E0E0E0;
+                font-family: Arial;
+            }
+            QTreeWidget {
+                background-color: #2E2E2E;
+                alternate-background-color: #3E3E3E;
+            }
+            QHeaderView::section {
+                background-color: #2E2E2E;
+                color: #E0E0E0;
+            }
+            QPushButton {
+                background-color: #424242;
+                color: #E0E0E0;
+                border: 1px solid #555;
+                padding: 4px;
+            }
+            QPushButton:hover {
+                background-color: #555;
+            }
+            QComboBox {
+                background-color: #424242;
+                color: #E0E0E0;
+                border: 1px solid #555;
+                padding: 2px;
+            }
+            QLabel {
+                color: #E0E0E0;
+            }
+        """)
+
+    def create_connections(self):
+        self.convert_btn.clicked.connect(self.convert_to_locator)
+        self.hierarchy_btn.clicked.connect(self.convert_to_locator_with_hierarchy)
+        self.manual_root_btn.clicked.connect(self.convert_to_locator_with_manual_root)
+        self.camera_space_btn.clicked.connect(self.convert_to_camera_space)
+        self.bake_cleanup_btn.clicked.connect(self.bake_and_cleanup_selected)
+        self.refresh_btn.clicked.connect(self.refresh_constraint_tree)
+        self.select_btn.clicked.connect(self.select_from_group)
+        self.delete_group_btn.clicked.connect(self.delete_selected_group)
+
+    def showEvent(self, event):
+        self.setWindowOpacity(0)
+        animation = QtCore.QPropertyAnimation(self, b"windowOpacity")
+        animation.setDuration(1000)
+        animation.setStartValue(0)
+        animation.setEndValue(1)
+        animation.start(QtCore.QAbstractAnimation.DeleteWhenStopped)
+        super(SpaceSwitchConverter, self).showEvent(event)
+
+    def update_status_animation(self):
+        self.bakingCounter = (self.bakingCounter + 1) % 4
+        dots = "." * self.bakingCounter
+        self.statusLabel.setText("Status: Baking" + dots)
+
+    # ====================================================
+    # Bake Workflows
+    # ====================================================
+    def convert_to_locator(self):
+        start_time = cmds.playbackOptions(q=True, min=True)
+        end_time = cmds.playbackOptions(q=True, max=True)
+        selection = cmds.ls(selection=True)
+        if not selection:
+            cmds.warning("Please select at least one object.")
+            return
+
+        chain_count = self.chainCountSpin.value()
+        self.bakingCounter = 0
+        self.statusLabel.setText("Status: Baking")
+        self.statusTimer.start(300)
+        cmds.refresh(suspend=True)
+        try:
+            for obj in selection:
+                # Create a group to hold the locator chain
+                group_name = f"{obj}_locators_grp"
+                if cmds.objExists(group_name):
+                    # Find a unique name if the group already exists
+                    counter = 1
+                    while cmds.objExists(f"{group_name}_{counter}"):
+                        counter += 1
+                    group_name = f"{group_name}_{counter}"
+
+                group = cmds.group(empty=True, name=group_name)
+
+                locator_chain = []
+                root_name = f"{obj}_worldSpaceLocator_1"
+                root_loc = cmds.spaceLocator(n=root_name)[0]
+                locator_chain.append(root_loc)
+
+                # Parent the first locator to the group
+                cmds.parent(root_loc, group)
+
+                for i in range(2, chain_count + 1):
+                    loc_name = f"{obj}_worldSpaceLocator_{i}"
+                    new_loc = cmds.spaceLocator(n=loc_name)[0]
+                    cmds.parent(new_loc, locator_chain[-1])
+                    for attr in [".translate", ".rotate"]:
+                        for axis in "XYZ":
+                            cmds.setAttr(new_loc + attr + axis, 0)
+                    locator_chain.append(new_loc)
+
+                cmds.currentTime(start_time, edit=True)
+                trans = cmds.xform(obj, q=True, ws=True, t=True)
+                rot = cmds.xform(obj, q=True, ws=True, ro=True)
+                cmds.xform(locator_chain[0], ws=True, t=trans)
+                cmds.xform(locator_chain[0], ws=True, ro=rot)
+
+                for frame in range(int(start_time), int(end_time)+1):
+                    cmds.currentTime(frame, edit=True)
+                    trans = cmds.xform(obj, q=True, ws=True, t=True)
+                    rot = cmds.xform(obj, q=True, ws=True, ro=True)
+                    cmds.xform(locator_chain[0], ws=True, t=trans)
+                    cmds.xform(locator_chain[0], ws=True, ro=rot)
+                    cmds.setKeyframe(locator_chain[0], attribute='translate', t=frame)
+                    cmds.setKeyframe(locator_chain[0], attribute='rotate', t=frame)
+
+                cleanup_locator(locator_chain[0])
+                existing = cmds.listRelatives(obj, type="parentConstraint") or []
+                if existing:
+                    cmds.delete(existing)
+
+                group_id = get_next_group_id()
+                cnum = get_next_constraint_number(group_id)
+                cname = f"parentConstraint_bulk_ID_{group_id}_{cnum:03d}"
+                createSafeParentConstraint(locator_chain[-1], obj, name=cname, maintainOffset=False)
+
+                for frame in range(int(start_time), int(end_time)+1):
+                    cmds.currentTime(frame, edit=True)
+                    trans = cmds.xform(locator_chain[-1], q=True, ws=True, t=True)
+                    rot = cmds.xform(locator_chain[-1], q=True, ws=True, ro=True) # Corrected: Use last locator in chain
+                    cmds.setKeyframe(locator_chain[-1], attribute='translate', t=frame)
+                    cmds.setKeyframe(locator_chain[-1], attribute='rotate', t=frame)
+
+                cleanup_locator(locator_chain[-1])
+        finally:
+            cmds.refresh(suspend=False)
+            self.statusTimer.stop()
+            self.statusLabel.setText("Status: Baking complete")
+            QtCore.QTimer.singleShot(1000, lambda: self.statusLabel.setText("Status: Idle"))
+
+        cmds.inViewMessage(amg="Baking complete; constraints created.", pos='midCenter', fade=True)
+        self.refresh_constraint_tree()
+
+    def convert_to_locator_with_hierarchy(self):
+        start_time = cmds.playbackOptions(q=True, min=True)
+        end_time = cmds.playbackOptions(q=True, max=True)
+        selection = cmds.ls(selection=True)
+        if not selection or len(selection) < 2:
+            cmds.warning("Select at least two objects: first for the locator and last for hierarchy.")
+            return
+        first_obj = selection[0]
+        last_obj = selection[-1]
+        chain_count = self.chainCountSpin.value()
+
+        self.bakingCounter = 0
+        self.statusLabel.setText("Status: Baking")
+        self.statusTimer.start(300)
+
+        cmds.refresh(suspend=True)
+        try:
+            # Create a group to hold the locator chain
+            group_name = f"{first_obj}_hierarchy_locators_grp"
+            if cmds.objExists(group_name):
+                # Find a unique name if the group already exists
+                counter = 1
+                while cmds.objExists(f"{group_name}_{counter}"):
+                    counter += 1
+                group_name = f"{group_name}_{counter}"
+
+            # Create the main group
+            main_group = cmds.group(empty=True, name=group_name)
+
+            # Create the locator chain
+            locator_chain = []
+            root_name = f"{first_obj}_worldSpaceLocator_1"
+            root_loc = cmds.spaceLocator(n=root_name)[0]
+            locator_chain.append(root_loc)
+
+            # Parent the first locator to the group
+            cmds.parent(root_loc, main_group)
+
+            # Create additional locators in the chain if needed
+            for i in range(2, chain_count + 1):
+                loc_name = f"{first_obj}_worldSpaceLocator_{i}"
+                new_loc = cmds.spaceLocator(n=loc_name)[0]
+                cmds.parent(new_loc, locator_chain[-1])
+                for attr in [".translate", ".rotate"]:
+                    for axis in "XYZ":
+                        cmds.setAttr(new_loc + attr + axis, 0)
+                locator_chain.append(new_loc)
+
+            # Instead of parenting the locator to the last object,
+            # parent constraint the group to the last object
+            try:
+                pc_name = f"{last_obj}_to_{group_name}_parentConstraint"
+                cmds.parentConstraint(last_obj, main_group, maintainOffset=False, name=pc_name)
+            except Exception as e:
+                cmds.warning(f"Parent constraining failed: {e}")
+
+            # Bake animation from first selected object to the root locator
+            cmds.currentTime(start_time, edit=True)
+            trans = cmds.xform(first_obj, q=True, ws=True, t=True)
+            rot = cmds.xform(first_obj, q=True, ws=True, ro=True)
+            cmds.xform(root_loc, ws=True, t=trans)
+            cmds.xform(root_loc, ws=True, ro=rot)
+
+            for frame in range(int(start_time), int(end_time)+1):
+                cmds.currentTime(frame, edit=True)
+                trans = cmds.xform(first_obj, q=True, ws=True, t=True)
+                rot = cmds.xform(first_obj, q=True, ws=True, ro=True)
+                cmds.xform(root_loc, ws=True, t=trans)
+                cmds.xform(root_loc, ws=True, ro=rot)
+                cmds.setKeyframe(root_loc, attribute='translate', t=frame)
+                cmds.setKeyframe(root_loc, attribute='rotate', t=frame)
+
+            # Clean up the locator's animation
+            cleanup_locator(root_loc)
+
+            # Delete any existing parent constraints on the first object
+            existing = cmds.listRelatives(first_obj, type="parentConstraint") or []
+            if existing:
+                cmds.delete(existing)
+
+            # Create a new parent constraint from the last locator to the first object
+            group_id = get_next_group_id()
+            cnum = get_next_constraint_number(group_id)
+            cname = f"parentConstraint_bulk_ID_{group_id}_{cnum:03d}"
+            createSafeParentConstraint(locator_chain[-1], first_obj, name=cname, maintainOffset=False)
+        finally:
+            cmds.refresh(suspend=False)
+            self.statusTimer.stop()
+            self.statusLabel.setText("Status: Baking complete")
+            QtCore.QTimer.singleShot(1000, lambda: self.statusLabel.setText("Status: Idle"))
+
+        cmds.inViewMessage(amg="Hierarchy bake complete.", pos='midCenter', fade=True)
+        self.refresh_constraint_tree()
+
+    def convert_to_locator_with_manual_root(self):
+        selection = cmds.ls(selection=True)
+        if not selection:
+            cmds.warning("Select at least one object (first object drives the bake).")
+            return
+        first_obj = selection[0]
+        start_time = cmds.playbackOptions(q=True, min=True)
+        end_time = cmds.playbackOptions(q=True, max=True)
+        manual_root = cmds.spaceLocator(n=first_obj + "_manualRoot_locator")[0]
+        self.manualRootLocator = manual_root
+        cmds.confirmDialog(title="Manual Root Setup",
+                           message="A manual root locator has been created.\n\nReposition it as desired, then deselect it to continue.",
+                           button=["OK"])
+        cmds.select(manual_root)
+        def onSelectionChange():
+            current_sel = cmds.ls(selection=True)
+            if manual_root not in current_sel:
+                chain_count = self.chainCountSpin.value()
+                cmds.refresh(suspend=True)
+                try:
+                    locator_chain = []
+                    root_name = f"{first_obj}_worldSpaceLocator_1"
+                    root_loc = cmds.spaceLocator(n=root_name)[0]
+                    locator_chain.append(root_loc)
+                    for i in range(2, chain_count + 1):
+                        loc_name = f"{first_obj}_worldSpaceLocator_{i}"
+                        new_loc = cmds.spaceLocator(n=loc_name)[0]
+                        cmds.parent(new_loc, locator_chain[-1])
+                        for attr in [".translate", ".rotate"]:
+                            for axis in "XYZ":
+                                cmds.setAttr(new_loc + attr + axis, 0)
+                        locator_chain.append(new_loc)
+                    try:
+                        cmds.parent(root_loc, manual_root)
+                    except Exception as e:
+                        cmds.warning(f"Error parenting locator chain: {e}")
+                        return
+                    group_name = cmds.group(empty=True, name=manual_root + "_grp")
+                    cmds.matchTransform(group_name, manual_root, pos=True, rot=True)
+                    cmds.parent(manual_root, group_name)
+                    cmds.currentTime(start_time, edit=True)
+                    trans = cmds.xform(first_obj, q=True, ws=True, t=True)
+                    rot = cmds.xform(first_obj, q=True, ws=True, ro=True)
+                    cmds.xform(root_loc, ws=True, t=trans)
+                    cmds.xform(root_loc, ws=True, ro=rot)
+                    for frame in range(int(start_time), int(end_time)+1):
+                        cmds.currentTime(frame, edit=True)
+                        trans = cmds.xform(first_obj, q=True, ws=True, t=True)
+                        rot = cmds.xform(first_obj, q=True, ws=True, ro=True)
+                        cmds.xform(root_loc, ws=True, t=trans)
+                        cmds.xform(root_loc, ws=True, ro=rot)
+                        cmds.setKeyframe(root_loc, attribute='translate', t=frame)
+                        cmds.setKeyframe(root_loc, attribute='rotate', t=frame)
+                    cleanup_locator(root_loc)
+                    existing = cmds.listRelatives(first_obj, type="parentConstraint") or []
+                    if existing:
+                        cmds.delete(existing)
+                    group_id = get_next_group_id()
+                    cnum = get_next_constraint_number(group_id)
+                    cname = f"parentConstraint_bulk_ID_{group_id}_{cnum:03d}"
+                    createSafeParentConstraint(locator_chain[-1], first_obj, name=cname, maintainOffset=False)
+                finally:
+                    cmds.refresh(suspend=False)
+                cmds.inViewMessage(amg="Manual Root bake complete.", pos='midCenter', fade=True)
+                self.refresh_constraint_tree()
+        self.manualRootScriptJob = cmds.scriptJob(event=["SelectionChanged", onSelectionChange],
+                                                   runOnce=True, protected=True)
+
+    def convert_to_camera_space(self):
+        """
+        Modified Bake to Camera Space workflow:
+          1. Create a locator at the origin and group it.
+          2. Match the group's transform to the selected object.
+          3. Aim constrain the group to the active camera (aimVector=[1,0,0], maintainOffset off),
+             so the group points toward the camera (down the Z axis).
+          4. Parent constrain the locator to the object (maintain offsets ON).
+          5. Create a point constraint on the group to the initial selection (maintain offsets OFF).
+          6. Bake the group's position transforms.
+          7. Bake the locator's keys using cmds.bakeResults.
+          8. Delete the constraints on both the locator and the group.
+          9. Parent constrain the initial object to the locator (maintain offsets ON).
+        """
+        selection = cmds.ls(selection=True)
+        if not selection:
+            cmds.warning("Select at least one object to bake.")
+            return
+        first_obj = selection[0]
+        start_time = cmds.playbackOptions(q=True, min=True)
+        end_time = cmds.playbackOptions(q=True, max=True)
+
+        self.bakingCounter = 0
+        self.statusLabel.setText("Status: Baking")
+        self.statusTimer.start(300)
+        cmds.refresh(suspend=True)
+
+        try:
+            # Step 1: Create a locator at the origin and group it
+            loc_name = f"{first_obj}_cameraSpaceLocator"
+            loc = cmds.spaceLocator(n=loc_name)[0]
+            grp_name = f"{first_obj}_cameraSpaceLocator_grp"
+            grp = cmds.group(loc, name=grp_name)
+
+            # Step 2: Match the group's transform to the selected object
+            cmds.matchTransform(grp, first_obj, pos=True, rot=True)
+
+            # Step 3: Aim constrain the group to the active camera
+            active_panel = cmds.getPanel(withFocus=True)
+            if not active_panel or "modelPanel" not in active_panel:
+                cmds.warning("Active viewport not found.")
+                return
+            active_cam = cmds.modelPanel(active_panel, query=True, camera=True)
+            if not active_cam:
+                cmds.warning("No active camera found.")
+                return
+            aim_constraint = cmds.aimConstraint(active_cam, grp, aimVector=[1,0,0], maintainOffset=False)[0]
+
+            # Step 4: Parent constrain the locator to the object (maintain offsets ON)
+            pc = cmds.parentConstraint(first_obj, loc, maintainOffset=True, name=f"{first_obj}_pc_camspace")[0]
+
+            # Step 5: Create a point constraint on the group to the initial selection (offsets OFF)
+            ptc = cmds.pointConstraint(first_obj, grp, maintainOffset=False, name=f"{first_obj}_ptc_camspace")[0]
+
+            # Step 6: Bake the group's position transforms
+            print(f"Baking group position from frame {start_time} to {end_time}")
+            for frame in range(int(start_time), int(end_time)+1):
+                cmds.currentTime(frame, edit=True)
+                cmds.setKeyframe(grp, attribute='translate', t=frame)
+            
+            # Clean up the group's animation
+            cleanup_locator(grp)
+
+            # Step 7: Bake the locator's keys
+            cmds.bakeResults(loc, t=(int(start_time), int(end_time)), 
+                            simulation=True, 
+                            attribute=["tx", "ty", "tz", "rx", "ry", "rz"],
+                            disableImplicitControl=True, 
+                            preserveOutsideKeys=True)
+
+            # Step 8: Delete the constraints
+            for constraint in [pc, ptc, aim_constraint]:
+                if cmds.objExists(constraint):
+                    cmds.delete(constraint)
+
+            # Step 9: Parent constrain the initial object to the locator (maintain offsets ON)
+            group_id = get_next_group_id()
+            cnum = get_next_constraint_number(group_id)
+            cname = f"parentConstraint_bulk_ID_{group_id}_{cnum:03d}"
+            createSafeParentConstraint(loc, first_obj, name=cname, maintainOffset=True)
+
+        finally:
+            cmds.refresh(suspend=False)
+            self.statusTimer.stop()
+            self.statusLabel.setText("Status: Baking complete")
+            QtCore.QTimer.singleShot(1000, lambda: self.statusLabel.setText("Status: Idle"))
+
+        cmds.inViewMessage(amg="Camera Space bake complete.", pos='midCenter', fade=True)
+        self.refresh_constraint_tree()
+
+    def bake_and_cleanup_selected(self):
+        """
+        Bakes the animation of a selected object to itself and
+        cleans up redundant keys using the cleanup_locator function.
+        Handles translation, rotation, scale, and visibility channels.
+        """
+        selection = cmds.ls(selection=True)
+        if not selection:
+            cmds.warning("Please select at least one object to bake and cleanup.")
+            return
+
+        start_time = cmds.playbackOptions(q=True, min=True)
+        end_time = cmds.playbackOptions(q=True, max=True)
+
+        self.bakingCounter = 0
+        self.statusLabel.setText("Status: Baking and cleaning up")
+        self.statusTimer.start(300)
+
+        cmds.refresh(suspend=True)
+        try:
+            for obj in selection:
+                print(f"\n--- Processing {obj} ---")
+
+                # Step 1: Bake the object's animation to itself
+                print(f"Baking animation from frame {start_time} to {end_time}")
+
+                # Add scale and visibility to attributes being baked
+                attrs = ["tx", "ty", "tz", "rx", "ry", "rz", "sx", "sy", "sz", "v"]
+
+                try:
+                    cmds.bakeResults(obj,
+                        t=(int(start_time), int(end_time)),
+                        simulation=True,
+                        attribute=attrs,
+                        disableImplicitControl=True,
+                        preserveOutsideKeys=True,
+                        sparseAnimCurveBake=False,
+                        removeBakedAttributeFromLayer=False,
+                        bakeOnOverrideLayer=False,
+                        minimizeRotation=True,
+                        controlPoints=False,
+                        shape=False)
+                except Exception as e:
+                    print(f"Baking error: {e}")
+                    # Try again without visibility if it fails
+                    if "v" in attrs:
+                        attrs.remove("v")
+                        print("Retrying without visibility...")
+                        try:
+                            cmds.bakeResults(obj,
+                                t=(int(start_time), int(end_time)),
+                                simulation=True,
+                                attribute=attrs,
+                                disableImplicitControl=True,
+                                preserveOutsideKeys=True,
+                                sparseAnimCurveBake=False,
+                                removeBakedAttributeFromLayer=False,
+                                bakeOnOverrideLayer=False,
+                                minimizeRotation=True,
+                                controlPoints=False,
+                                shape=False)
+                        except Exception as e2:
+                            print(f"Second baking attempt error: {e2}")
+
+                # Step 2: Ensure the dependency graph is updated
+                cmds.dgdirty(a=True)
+                cmds.refresh(force=True)
+
+                # Step 3: Debug info - check for keyframes after baking
+                channels = [
+                    "translateX", "translateY", "translateZ",
+                    "rotateX", "rotateY", "rotateZ",
+                    "scaleX", "scaleY", "scaleZ",
+                    "visibility"
+                ]
+
+                print("\nVerifying keyframes after baking:")
+                for attr in channels:
+                    full_attr = f"{obj}.{attr}"
+                    if cmds.objExists(full_attr):
+                        count = cmds.keyframe(full_attr, query=True, keyframeCount=True) or 0
+                        if count:
+                            print(f"  {attr}: {count} keyframes found")
+                        else:
+                            print(f"  {attr}: No keyframes")
+                    else:
+                        print(f"  {attr}: Attribute doesn't exist")
+
+                # Step 4: Run the cleanup function
+                print("\nApplying cleanup...")
+                cleanup_locator(obj) # Corrected: Call cleanup_locator for the object itself
+
+                # Step 5: Verify results
+                print("\nFinal keyframe counts after cleanup:")
+                for attr in channels:
+                    full_attr = f"{obj}.{attr}"
+                    if cmds.objExists(full_attr):
+                        count = cmds.keyframe(full_attr, query=True, keyframeCount=True) or 0
+                        if count:
+                            print(f"  {attr}: {count} keyframes remaining")
+                        else:
+                            try:
+                                value = cmds.getAttr(full_attr)
+                                print(f"  {attr}: Static value {value}")
+                            except:
+                                print(f"  {attr}: Cannot read static value")
+                    else:
+                        print(f"  {attr}: Attribute doesn't exist")
+        finally:
+            cmds.refresh(suspend=False)
+            self.statusTimer.stop()
+            self.statusLabel.setText("Status: Baking and cleanup complete")
+            QtCore.QTimer.singleShot(1000, lambda: self.statusLabel.setText("Status: Idle"))
+
+        cmds.inViewMessage(amg="Object baking and cleanup complete.", pos='midCenter', fade=True)
+
+    # ====================================================
+    # Constraint Group Tree & Selection Methods
+    # ====================================================
+    def refresh_constraint_tree(self):
+        self.constraint_tree.clear()
+        all_constraints = cmds.ls(type=["pointConstraint", "orientConstraint", "parentConstraint"]) or []
+        groups = {}
+        for cons in all_constraints:
+            match = re.search(r'(.*Constraint)_bulk_ID_(\d+)', cons)
+            if match:
+                ctype = match.group(1)
+                group_id = match.group(2)
+                key = f"{ctype}_bulk_ID_{group_id}"
+                groups.setdefault(key, []).append(cons)
+        for group_key in sorted(groups.keys()):
+            top_item = QtWidgets.QTreeWidgetItem(self.constraint_tree, [group_key])
+            top_item.setData(0, QtCore.Qt.UserRole, group_key)
+            cons_item = QtWidgets.QTreeWidgetItem(top_item, ["Constraints"])
+            for cons in groups[group_key]:
+                child = QtWidgets.QTreeWidgetItem(cons_item, [cons])
+                child.setBackground(0, QtGui.QBrush(QtGui.QColor(HIGHLIGHT_CONSTRAINT)))
+                child.setForeground(0, QtGui.QBrush(QtGui.QColor("black")))
+            objs_item = QtWidgets.QTreeWidgetItem(top_item, ["Objects"])
+            objects_set = set()
+            for cons in groups[group_key]:
+                targets, constrained = get_constraint_objects(cons)
+                if targets:
+                    objects_set.update(targets)
+                if constrained:
+                    objects_set.update(constrained)
+            for obj in sorted(objects_set):
+                child = QtWidgets.QTreeWidgetItem(objs_item, [obj])
+                child.setBackground(0, QtGui.QBrush(get_highlight_color_for_object(obj)))
+                child.setForeground(0, QtGui.QBrush(QtGui.QColor("black")))
+        self.constraint_tree.expandAll()
+
+    def on_tree_item_clicked(self, item, column):
+        text = item.text(column)
+        if text in ["Constraints", "Objects"]:
+            return
+        if item.childCount() == 0:
+            try:
+                cmds.select(text, replace=True)
+            except Exception as e:
+                cmds.warning(f"Failed to select {text}: {e}")
+        else:
+            leaf_items = []
+            def collect_leaf_items(parent):
+                for i in range(parent.childCount()):
+                    child = parent.child(i)
+                    if child.childCount() == 0:
+                        leaf_items.append(child.text(0))
+                    else:
+                        collect_leaf_items(child)
+            collect_leaf_items(item)
+            if leaf_items:
+                cmds.select(leaf_items, replace=True)
+            else:
+                cmds.select(text, replace=True)
+
+    def select_from_group(self):
+        item = self.constraint_tree.currentItem()
+        if not item:
+            cmds.warning("Please select a group or a child item in the tree.")
+            return
+        top = item
+        while top.parent():
+            top = top.parent()
+        group_key = top.data(0, QtCore.Qt.UserRole)
+        if not group_key:
+            cmds.warning("Group key not found.")
+            return
+        mode = self.select_mode_combo.currentText()
+        if mode == "Constraints":
+            constraints = cmds.ls(f"{group_key}_*") or []
+            if constraints:
+                cmds.select(constraints, replace=True)
+            else:
+                cmds.select(clear=True)
+                cmds.warning("No constraints found for this group.")
+        else:
+            objects_set = set()
+            constraints = cmds.ls(f"{group_key}_*") or []
+            for cons in constraints:
+                target, constrained = get_constraint_objects(cons)
+                if target:
+                    objects_set.update(target)
+                if constrained:
+                    objects_set.update(constrained)
+            if objects_set:
+                cmds.select(list(objects_set), replace=True)
+            else:
+                cmds.select(clear=True)
+                cmds.warning("No objects found for this group.")
+
+    def delete_selected_group(self):
+        item = self.constraint_tree.currentItem()
+        if not item:
+            cmds.warning("Please select a group in the tree to delete.")
+            return
+        top_item = item
+        while top_item.parent():
+            top_item = top_item.parent()
+        group_key = top_item.data(0, QtCore.Qt.UserRole)
+        if not group_key:
+            cmds.warning("No group key found for the selected item.")
+            return
+        confirm = cmds.confirmDialog(
+            title="Delete Group",
+            message=f"Delete group '{group_key}' and all its constraints, baked locators and corresponding manual root locators?",
+            button=["Yes", "No"],
+            defaultButton="Yes",
+            cancelButton="No",
+            dismissString="No"
+        )
+        if confirm != "Yes":
+            return
+
+        # FIX: Get constraints of each type separately instead of passing a list
+        point_constraints = cmds.ls(f"*_bulk_ID_*", type="pointConstraint") or []
+        orient_constraints = cmds.ls(f"*_bulk_ID_*", type="orientConstraint") or []
+        parent_constraints = cmds.ls(f"*_bulk_ID_*", type="parentConstraint") or []
+        constraints = point_constraints + orient_constraints + parent_constraints
+        
+        constraints_in_group = [c for c in constraints if group_key in c]
+        objects_to_delete = set()
+        locator_groups_to_delete = set()
+        hierarchy_groups_to_delete = set()
+        hierarchy_constraints_to_delete = set()
+
+        for cons in constraints_in_group:
+            targets, constrained = get_constraint_objects(cons)
+            if targets:
+                for obj in targets:
+                    if "_worldSpaceLocator" in obj and cmds.objExists(obj):
+                        # Find the root locator
+                        root = obj
+                        while cmds.listRelatives(root, parent=True):
+                            parent = cmds.listRelatives(root, parent=True)[0]
+                            if "_worldSpaceLocator" in parent or "_manualRoot_locator" in parent:
+                                root = parent
+                            else:
+                                break
+
+                        # Add the root locator and all its descendants to delete list
+                        objects_to_delete.add(root)
+                        descendants = cmds.listRelatives(root, allDescendents=True) or []
+                        objects_to_delete.update(descendants)
+
+                        # Check for the locator group
+                        if "_worldSpaceLocator_1" in root:
+                            # Extract the original object name from the locator name
+                            obj_name = root.replace("_worldSpaceLocator_1", "")
+                            
+                            # Look for regular locator groups
+                            regular_groups = cmds.ls(f"{obj_name}_locators_grp*") or []
+                            for grp in regular_groups:
+                                # Check if this locator is a child of this group
+                                rel_descendants = cmds.listRelatives(grp, allDescendents=True) or []
+                                if root in rel_descendants:
+                                    locator_groups_to_delete.add(grp)
+                            
+                            # Look for hierarchy locator groups
+                            hierarchy_groups = cmds.ls(f"{obj_name}_hierarchy_locators_grp*") or []
+                            for grp in hierarchy_groups:
+                                # Check if this locator is a child of this group
+                                rel_descendants = cmds.listRelatives(grp, allDescendents=True) or []
+                                if root in rel_descendants:
+                                    hierarchy_groups_to_delete.add(grp)
+                                    
+                                    # Find any constraints attached to this hierarchy group
+                                    h_constraints = cmds.listConnections(grp, type="parentConstraint") or []
+                                    hierarchy_constraints_to_delete.update(h_constraints)
+
+                        # Handle manual root locators
+                        if "_manualRoot_locator" in root:
+                            objects_to_delete.add(root)
+                            parent_group = root + "_grp"
+                            if cmds.objExists(parent_group):
+                                objects_to_delete.add(parent_group)
+
+                    elif "_manualRoot_locator" in obj and cmds.objExists(obj):
+                        objects_to_delete.add(obj)
+                        parent_group = obj + "_grp"
+                        if cmds.objExists(parent_group):
+                            objects_to_delete.add(parent_group)
+
+            # Add the constraint itself
+            if cmds.objExists(cons):
+                objects_to_delete.add(cons)
+
+        # Add hierarchy constraints to objects to delete
+        objects_to_delete.update(hierarchy_constraints_to_delete)
+        
+        # Delete the objects
+        for obj in objects_to_delete:
+            if cmds.objExists(obj):
+                try:
+                    cmds.delete(obj)
+                except Exception as e:
+                    cmds.warning(f"Failed to delete {obj}: {e}")
+
+        # Delete the locator groups
+        for grp in locator_groups_to_delete:
+            if cmds.objExists(grp):
+                try:
+                    cmds.delete(grp)
+                except Exception as e:
+                    cmds.warning(f"Failed to delete group {grp}: {e}")
+                    
+        # Delete the hierarchy groups
+        for grp in hierarchy_groups_to_delete:
+            if cmds.objExists(grp):
+                try:
+                    cmds.delete(grp)
+                except Exception as e:
+                    cmds.warning(f"Failed to delete hierarchy group {grp}: {e}")
+
+        cmds.inViewMessage(amg=f"Deleted group '{group_key}'.", pos='midCenter', fade=True)
+        self.refresh_constraint_tree()
+
+# ====================================================
+# Run the UI
+# ====================================================
+app = QtWidgets.QApplication.instance()
+if not app:
+    app = QtWidgets.QApplication([])
+
+window = SpaceSwitchConverter()
+window.setMinimumSize(400, 600)  # Set a minimum size so it's visible
+window.show()
+window.raise_()  # Bring window to front
+window.activateWindow()  # Make it the active window
+
+if __name__ == "__main__" and not cmds.about(batch=True):
+    try:
+        app.exec_()
+    except SystemExit as e:
+        if e.code == -1:
+            pass
+        else:
+            raise
