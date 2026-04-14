@@ -1,0 +1,193 @@
+// Written by Richard Lico - Copyright Animation Sherpa 2019 
+// Do no redistribute. For Personal use only. 
+
+// creates an aim constraint for selected object // 
+
+float $startTime= `playbackOptions -q -min` ;
+float $endTime= `playbackOptions -q -max` ;
+source channelBoxCommand;
+
+// saving current namespace and setting it to root temporarily // 
+string $currentns = `namespaceInfo -cur`;
+namespace -set ":";
+
+string $sel[] = `ls -sl`;
+if( size($sel) == 0 )
+{
+	// Reminds you to select something for this to work // 
+	confirmDialog -title "Confirm" -message "You need to select something first" ;
+}
+else 
+{
+	// makes a list (array) of your selected objects // 
+	string $array[] = `ls -sl`;
+	// for every item you have selected, do this for loop // 
+	for ($item in $array)
+	{
+		// redefines the item in the array as $aimObj // 
+		string $obj = $item ;
+		// creates a locator with the selected object's name with _temp_aimspace_target appended // 
+		spaceLocator -n ($obj + "_temp_aimspace_root") ;
+		spaceLocator -n ($obj + "_temp_aimspace_offset") ;
+		spaceLocator -n ($obj + "_temp_aimspace_target") ;
+
+		parent ($obj + "_temp_aimspace_offset") ($obj + "_temp_aimspace_root") ;
+		
+		// sets size of locator // 
+		setAttr ($obj + "_temp_aimspace_target.localScaleX") 5;
+		setAttr ($obj + "_temp_aimspace_target.localScaleY") 5;
+		setAttr ($obj + "_temp_aimspace_target.localScaleZ") 5;
+	
+		// constrains root to existing motion // 
+		select $obj ;
+		select -tgl ($obj + "_temp_aimspace_root") ;
+		pointConstraint ;
+		orientConstraint ;
+	
+		// selects objects // 
+		select $obj ;
+		select -tgl ($obj + "_temp_aimspace_target") ;
+		
+		// Ask the user what axis they want to use for an aim offset // 
+		$response = `confirmDialog -title "Confirm" -message "What up-axis do you want?"
+			-button "+X" -button "+Y" -button "+Z" -button "-X" -button "-Y" -button "-Z" -defaultButton "+Z"
+			-cancelButton "+Z" -dismissString "+Z"`;
+			
+		// puts the target off in space based on the chosen axis // 
+		// The offset values are arbitrary. Alter to fit your scene // 
+		if( $response == "+X" ) {
+			pointConstraint ;
+			orientConstraint ;
+			
+			select -r ($obj + "_temp_aimspace_target");
+			delete -cn;
+			xform -os -r -translation 65 0 0;
+			} else { 
+				if( $response == "+Y" ) {
+					pointConstraint ;
+					orientConstraint ;
+					
+					select -r ($obj + "_temp_aimspace_target");
+					delete -cn;
+					xform -os -r -translation 0 65 0;
+					} else {
+						if( $response == "+Z" ) {
+							pointConstraint ;
+							orientConstraint ;
+							
+							select -r ($obj + "_temp_aimspace_target");
+							delete -cn;
+							xform -os -r -translation 0 0 65;
+						} else {
+							if( $response == "-X" ) {
+								pointConstraint ;
+								orientConstraint ;
+								
+								select -r ($obj + "_temp_aimspace_target");
+								delete -cn;
+								xform -os -r -translation -65 0 0;
+							} else {
+								if( $response == "-Y" ) {
+									pointConstraint ;
+									orientConstraint ;
+									
+									select -r ($obj + "_temp_aimspace_target");
+									delete -cn;
+									xform -os -r -translation 0 -65 0;
+								} else {
+									if( $response == "-Z" ) {
+										pointConstraint ;
+										orientConstraint ;
+										
+										select -r ($obj + "_temp_aimspace_target");
+										delete -cn;
+										xform -os -r -translation 0 0 -65;
+									}
+								}
+							}
+						}
+					}
+				}
+				
+		select $obj ;
+		select -tgl ($obj + "_temp_aimspace_target") ;
+		parentConstraint -mo ;
+		
+		// bakes the root and target. Then deletes constraints on them // 
+		select ($obj + "_temp_aimspace_target") ($obj + "_temp_aimspace_root") ;
+		{
+			refresh -suspend 1;
+			bakeResults -simulation true -t ($startTime+":"+$endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -removeBakedAttributeFromLayer false -removeBakedAnimFromLayer false -bakeOnOverrideLayer false -minimizeRotation true -controlPoints false ;
+			delete -sc;
+			filterCurve;
+			DeleteConstraints;
+			refresh -suspend 0;
+		}
+		
+		// reverses the constraints // 
+		
+		select ($obj + "_temp_aimspace_offset") ;
+		setAttr ($obj + "_temp_aimspace_offset.rotateX") 0;
+		setAttr ($obj + "_temp_aimspace_offset.rotateY") 0;
+		setAttr ($obj + "_temp_aimspace_offset.rotateZ") 0;
+		select -tgl $obj ;
+		
+		// setting different aim conditions depending on X Y Z choice // 
+		select ($obj + "_temp_aimspace_target") ;
+		select -tgl ($obj + "_temp_aimspace_offset") ;
+		if( $response == "+X" ) {
+			aimConstraint -mo -weight 1 -aimVector 1 0 0 -upVector 0 0 1 -worldUpType "objectrotation" -worldUpVector 0 0 1 -worldUpObject ($obj + "_temp_aimspace_root");
+			} else { 
+				if( $response == "+Y" ) {
+					aimConstraint -mo -weight 1 -aimVector 0 1 0 -upVector 0 0 1 -worldUpType "objectrotation" -worldUpVector 0 0 1 -worldUpObject ($obj + "_temp_aimspace_root");
+					} else {
+						if( $response == "+Z" ) {
+							aimConstraint -mo -weight 1 -aimVector 0 0 1 -upVector 0 1 0 -worldUpType "objectrotation" -worldUpVector 0 1 0 -worldUpObject ($obj + "_temp_aimspace_root");
+						} else {
+							if( $response == "-X" ) {
+								aimConstraint -mo -weight 1 -aimVector -1 0 0 -upVector 0 0 1 -worldUpType "objectrotation" -worldUpVector 0 0 1 -worldUpObject ($obj + "_temp_aimspace_root");
+							} else {
+								if( $response == "-Y" ) {
+									aimConstraint -mo -weight 1 -aimVector 0 -1 0 -upVector 0 0 1 -worldUpType "objectrotation" -worldUpVector 0 0 1 -worldUpObject ($obj + "_temp_aimspace_root");
+								} else {
+									if( $response == "-Z" ) {
+										aimConstraint -mo -weight 1 -aimVector 0 0 -1 -upVector 0 1 0 -worldUpType "objectrotation" -worldUpVector 0 1 0 -worldUpObject ($obj + "_temp_aimspace_root");
+									}
+								}
+							}
+						}
+					}
+				}
+				
+		// Ask the user if they want to include translation on selected object // 
+		$response2 = `confirmDialog -title "Confirm" -message "convert to world space translation?"
+			-button "Yes" -button "No" -defaultButton "Yes"
+			-cancelButton "No" -dismissString "No"`;
+			
+		if( $response2 == "No" ) {
+			select -r $obj ;
+			select -tgl ($obj + "_temp_aimspace_root") ;
+			pointConstraint ;
+			
+			select ($obj + "_temp_aimspace_offset") ;
+			select -tgl $obj ;
+			orientConstraint ;
+		} else { 
+			select -r ($obj + "_temp_aimspace_root") ;
+			select -tgl $obj ; 
+			pointConstraint ;
+			
+			select -r ($obj + "_temp_aimspace_offset") ;
+			select -tgl $obj ;
+			orientConstraint ;
+		}
+		
+		select ($obj + "_temp_aimspace_target") ;
+		if( `objExists ($currentns + ":rig_layer")` ) {
+			editDisplayLayerMembers -noRecurse ($currentns + ":rig_layer") `ls -selection`;
+		}
+	}
+}
+
+// restoring original namespace // 
+namespace -set $currentns;

@@ -1,0 +1,81 @@
+// Written by Richard Lico - Copyright Animation Sherpa 2020 
+// Do no redistribute. For Personal use only. 
+
+// convert object to world space //
+
+float $startTime= `playbackOptions -q -min` ;
+float $endTime= `playbackOptions -q -max` ;
+
+// sourcing channel box // 
+source channelBoxCommand;
+
+// begin // 
+string $sel[] = `ls -sl`;
+if( size($sel) == 0 ) {
+	// Reminds you to select something for this to work // 
+	confirmDialog -title "Confirm" -message "You need to select something first" ;
+}
+	else 
+{
+	// makes a list (array) of your selected objects // 
+	string $array[] = `ls -sl`;
+	// for every item you have selected, do this for loop // 
+	for ($item in $array) {
+		// creates a locator with the selected itemect's name with _temp_worldspace_locator appended // 
+		spaceLocator -p 0 0 0 -n ($item + "_temp_worldspace_locator") ;
+		
+		// sets size of locator // 
+		setAttr ($item + "_temp_worldspace_locator.localScaleX") 18;
+		setAttr ($item + "_temp_worldspace_locator.localScaleY") 18;
+		setAttr ($item + "_temp_worldspace_locator.localScaleZ") 18;
+	
+		// does the constraints between selected itemect and new locator and bakes it // 
+		select $item ;
+		select -tgl ($item + "_temp_worldspace_locator") ;
+		pointConstraint;
+		orientConstraint;
+		
+		select ($item + "_temp_worldspace_locator") ;
+		{
+			refresh -suspend 1;
+			bakeResults -simulation true -t ($startTime+":"+$endTime) -sampleBy 1 -disableImplicitControl true -preserveOutsideKeys true -sparseAnimCurveBake false -removeBakedAttributeFromLayer false -removeBakedAnimFromLayer false -bakeOnOverrideLayer false -minimizeRotation true -controlPoints false ;
+			delete -sc;
+			filterCurve;
+			DeleteConstraints;
+			refresh -suspend 0;
+		}
+	
+		// Ask the user what attributes they want to use // 
+		$response = `confirmDialog -title "Confirm" -message "What would you like to Control?"
+		-button "Rotation" -button "Translation" -button "Both" -defaultButton "Both"
+		-cancelButton "Both" -dismissString "Both"`;
+	
+		if( $response == "Rotation" ) {
+			select ($item + "_temp_worldspace_locator") ;
+			select -tgl $item ;
+			orientConstraint ;
+
+		} 
+		else { 
+			if( $response == "Translation" ) {
+				select ($item + "_temp_worldspace_locator") ;
+				select -tgl $item ;
+				pointConstraint ;
+
+			} 
+			else {
+				select ($item + "_temp_worldspace_locator") ;
+				select -tgl $item ;
+				pointConstraint ;
+				orientConstraint ;
+					
+			}
+		}
+		
+		// check to see if the Baqir rig_layer is in the scene, and add this new locator to it.// 
+		select ($item + "_temp_worldspace_locator") ;
+		if( `objExists  ("rig_layer")` ) {
+			editDisplayLayerMembers -noRecurse ("rig_layer") `ls -selection`;
+		}
+	}
+}
