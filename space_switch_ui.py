@@ -21,6 +21,7 @@ import maya.cmds as cmds
 import maya.mel as mel
 import maya.api.OpenMaya as om
 import math
+import random
 from functools import partial
 
 # Qt — try the Maya bundled shim first, fall back to bare PySide2 / PyQt5
@@ -235,6 +236,96 @@ QScrollBar::handle:vertical {
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
 """
+
+
+# ============================================================================
+# COLLAPSIBLE SECTION WIDGET
+# ============================================================================
+class CollapsibleSection(QtWidgets.QWidget):
+    """A QGroupBox replacement whose content slides open and closed on click."""
+
+    _BTN_SS = """
+        QPushButton {
+            text-align: left;
+            padding: 6px 10px;
+            border: 1px solid #4DD0E1;
+            border-radius: 3px;
+            background-color: #0D1F35;
+            color: #4DD0E1;
+            font-weight: bold;
+            letter-spacing: 1px;
+            font-family: "Courier New", monospace;
+            font-size: 11px;
+        }
+        QPushButton:checked {
+            background-color: #112240;
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+        QPushButton:hover, QPushButton:checked:hover {
+            background-color: #4DD0E1;
+            color: #0A0A1E;
+        }
+    """
+
+    def __init__(self, title, parent=None):
+        super(CollapsibleSection, self).__init__(parent)
+        self._title = title
+
+        vbox = QtWidgets.QVBoxLayout(self)
+        vbox.setContentsMargins(0, 0, 0, 2)
+        vbox.setSpacing(0)
+
+        # Toggle button acts as the section header
+        self._btn = QtWidgets.QPushButton(f"▼  {title}")
+        self._btn.setCheckable(True)
+        self._btn.setChecked(True)
+        self._btn.setStyleSheet(self._BTN_SS)
+        self._btn.clicked.connect(self._on_toggle)
+        vbox.addWidget(self._btn)
+
+        # Content body
+        self._body = QtWidgets.QWidget()
+        self._body.setObjectName("cs_body")
+        self._body.setStyleSheet("""
+            QWidget#cs_body {
+                background-color: #1A1A2E;
+                border: 1px solid #4DD0E1;
+                border-top: none;
+                border-bottom-left-radius: 3px;
+                border-bottom-right-radius: 3px;
+            }
+        """)
+        self.body_layout = QtWidgets.QVBoxLayout(self._body)
+        self.body_layout.setSpacing(6)
+        self.body_layout.setContentsMargins(8, 10, 8, 10)
+        vbox.addWidget(self._body)
+
+        # Slide animation on maximumHeight
+        self._anim = QtCore.QPropertyAnimation(self._body, b"maximumHeight")
+        self._anim.setDuration(200)
+        self._anim.setEasingCurve(QtCore.QEasingCurve.InOutQuart)
+
+    def _on_toggle(self, checked):
+        self._btn.setText(f"{'▼' if checked else '▶'}  {self._title}")
+        try:
+            self._anim.finished.disconnect()
+        except Exception:
+            pass
+
+        if checked:
+            self._body.show()
+            self._body.setMaximumHeight(0)
+            target = max(self._body.sizeHint().height(), 40)
+            self._anim.setStartValue(0)
+            self._anim.setEndValue(target)
+            self._anim.finished.connect(lambda: self._body.setMaximumHeight(16777215))
+        else:
+            self._anim.setStartValue(self._body.height())
+            self._anim.setEndValue(0)
+            self._anim.finished.connect(self._body.hide)
+
+        self._anim.start()
 
 
 # ============================================================================
@@ -816,6 +907,44 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
         dots = "·" * self.baking_counter + "  " * (3 - self.baking_counter)
         self.status_label.setText(f"◈  BAKING{dots}")
 
+    # ── Glitch animation ─────────────────────────────────────────────────────
+    _GLITCH_CHARS = "▓▒░█▄▀■□▪▫◆◇▸▹►▻"
+    _TITLE_ORIGINAL = "◈  SPACE  SWITCH"
+    _TITLE_SS_CYAN   = "color:#4DD0E1; font-size:16px; font-weight:bold; letter-spacing:3px;"
+    _TITLE_SS_RED    = "color:#FF5252; font-size:16px; font-weight:bold; letter-spacing:3px;"
+    _TITLE_SS_ORANGE = "color:#FFB74D; font-size:16px; font-weight:bold; letter-spacing:3px;"
+
+    def _scramble(self, text, intensity):
+        return "".join(
+            random.choice(self._GLITCH_CHARS) if random.random() < intensity else c
+            for c in text
+        )
+
+    def _start_glitch_cycle(self):
+        if not self.isVisible():
+            return
+        QtCore.QTimer.singleShot(random.randint(5000, 13000), self._do_glitch)
+
+    def _do_glitch(self):
+        if not self.isVisible():
+            return
+        t = self.title_lbl
+        orig, cyan, red, orange = (
+            self._TITLE_ORIGINAL, self._TITLE_SS_CYAN,
+            self._TITLE_SS_RED,   self._TITLE_SS_ORANGE,
+        )
+
+        # Flash 1 — red scramble
+        t.setText(self._scramble(orig, 0.5)); t.setStyleSheet(red)
+        # Flash 2 — restore (110 ms)
+        QtCore.QTimer.singleShot(110, lambda: (t.setText(orig),          t.setStyleSheet(cyan)))
+        # Flash 3 — orange scramble (180 ms)
+        QtCore.QTimer.singleShot(180, lambda: (t.setText(self._scramble(orig, 0.3)), t.setStyleSheet(orange)))
+        # Flash 4 — half-restore (260 ms)
+        QtCore.QTimer.singleShot(260, lambda: (t.setText(self._scramble(orig, 0.1)), t.setStyleSheet(cyan)))
+        # Restore fully + schedule next cycle (350 ms)
+        QtCore.QTimer.singleShot(350, lambda: (t.setText(orig), t.setStyleSheet(cyan), self._start_glitch_cycle()))
+
     # =========================================================================
     # BUILD UI
     # =========================================================================
@@ -839,9 +968,9 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
         header_layout = QtWidgets.QVBoxLayout(header)
         header_layout.setContentsMargins(12, 10, 12, 8)
         header_layout.setSpacing(2)
-        title_lbl = QtWidgets.QLabel("◈  SPACE  SWITCH")
-        sub_lbl   = QtWidgets.QLabel(f"ANIMATOR DASHBOARD  v{__version__}")
-        header_layout.addWidget(title_lbl)
+        self.title_lbl = QtWidgets.QLabel("◈  SPACE  SWITCH")
+        sub_lbl        = QtWidgets.QLabel(f"ANIMATOR DASHBOARD  v{__version__}")
+        header_layout.addWidget(self.title_lbl)
         header_layout.addWidget(sub_lbl)
         header.setStyleSheet("""
             QFrame {
@@ -850,7 +979,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             }
             QLabel { background-color: transparent; }
         """)
-        title_lbl.setStyleSheet("color:#4DD0E1; font-size:16px; font-weight:bold; letter-spacing:3px;")
+        self.title_lbl.setStyleSheet("color:#4DD0E1; font-size:16px; font-weight:bold; letter-spacing:3px;")
         sub_lbl.setStyleSheet("color:#546E7A; font-size:9px; letter-spacing:2px;")
         outer.addWidget(header)
 
@@ -890,18 +1019,16 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             display_text = ", ".join(sel) if len(sel) <= 3 else f"{sel[0]} ... ({len(sel)} objects)"
             self.source_field.setText(display_text)
 
+        # Kick off the title glitch cycle after the window settles
+        QtCore.QTimer.singleShot(3000, self._start_glitch_cycle)
+
 
     # =========================================================================
     # SECTION BUILDERS
     # =========================================================================
-    @staticmethod
-    def _make_section(title):
-        box = QtWidgets.QGroupBox(title)
-        layout = QtWidgets.QVBoxLayout()
-        layout.setSpacing(6)
-        layout.setContentsMargins(8, 14, 8, 8)
-        box.setLayout(layout)
-        return box, layout
+    def _make_section(self, title):
+        section = CollapsibleSection(title)
+        return section, section.body_layout
 
     @staticmethod
     def _hrow(parent_layout, spacing=6):
