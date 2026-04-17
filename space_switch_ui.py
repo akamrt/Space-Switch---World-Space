@@ -33,6 +33,29 @@ import maya.api.OpenMaya as om
 import math
 from functools import partial
 
+# Qt — try the Maya bundled shim first, fall back to bare PySide2 / PyQt5
+try:
+    from Qt import QtWidgets, QtGui, QtCore
+except ImportError:
+    try:
+        from PySide2 import QtWidgets, QtGui, QtCore
+    except ImportError:
+        from PyQt5 import QtWidgets, QtGui, QtCore
+
+# Maya main-window handle (used to parent the dashboard as a proper child window)
+try:
+    from maya import OpenMayaUI as omui
+    try:
+        from shiboken2 import wrapInstance
+    except ImportError:
+        from shiboken6 import wrapInstance
+    def _maya_main_window():
+        ptr = omui.MQtUtil.mainWindow()
+        return wrapInstance(int(ptr), QtWidgets.QWidget)
+except Exception:
+    def _maya_main_window():
+        return None
+
 # ============================================================================
 # CONSTANTS
 # ============================================================================
@@ -55,6 +78,168 @@ LOCATOR_COLORS = {
 }
 
 ROTATION_ORDERS = ["xyz", "yzx", "zxy", "xzy", "yxz", "zyx"]
+
+# ============================================================================
+# CYBERPUNK STYLESHEET
+# ============================================================================
+CYBERPUNK_SS = """
+QWidget {
+    background-color: #1A1A2E;
+    color: #B0BEC5;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 11px;
+}
+QGroupBox {
+    border: 1px solid #4DD0E1;
+    border-radius: 4px;
+    margin-top: 10px;
+    padding-top: 6px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    top: -1px;
+    color: #4DD0E1;
+    font-weight: bold;
+    letter-spacing: 1px;
+    background-color: #1A1A2E;
+    padding: 0 4px;
+}
+QPushButton {
+    background-color: #0F3460;
+    color: #B0BEC5;
+    border: 1px solid #4DD0E1;
+    border-radius: 3px;
+    padding: 5px 10px;
+}
+QPushButton:hover {
+    background-color: #4DD0E1;
+    color: #1A1A2E;
+    font-weight: bold;
+}
+QPushButton:pressed {
+    background-color: #00BCD4;
+    color: #1A1A2E;
+}
+QLineEdit {
+    background-color: #0F1923;
+    border: 1px solid #2E4A5A;
+    border-radius: 3px;
+    color: #4DD0E1;
+    padding: 3px 6px;
+    selection-background-color: #4DD0E1;
+    selection-color: #1A1A2E;
+}
+QLineEdit:focus {
+    border-color: #4DD0E1;
+}
+QCheckBox {
+    color: #B0BEC5;
+    spacing: 5px;
+}
+QCheckBox::indicator {
+    width: 13px;
+    height: 13px;
+    border: 1px solid #4DD0E1;
+    border-radius: 2px;
+    background-color: #0F1923;
+}
+QCheckBox::indicator:checked {
+    background-color: #4DD0E1;
+}
+QRadioButton {
+    color: #B0BEC5;
+    spacing: 5px;
+}
+QRadioButton::indicator {
+    width: 13px;
+    height: 13px;
+    border: 1px solid #4DD0E1;
+    border-radius: 7px;
+    background-color: #0F1923;
+}
+QRadioButton::indicator:checked {
+    background-color: #4DD0E1;
+}
+QComboBox {
+    background-color: #0F3460;
+    border: 1px solid #4DD0E1;
+    border-radius: 3px;
+    color: #E0E0E0;
+    padding: 3px 8px;
+    min-height: 22px;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left: 1px solid #4DD0E1;
+}
+QComboBox QAbstractItemView {
+    background-color: #16213E;
+    border: 1px solid #4DD0E1;
+    color: #E0E0E0;
+    selection-background-color: #4DD0E1;
+    selection-color: #1A1A2E;
+}
+QSlider::groove:horizontal {
+    border: 1px solid #4DD0E1;
+    height: 4px;
+    background: #0F1923;
+    border-radius: 2px;
+    margin: 0;
+}
+QSlider::handle:horizontal {
+    background: #4DD0E1;
+    border: 1px solid #4DD0E1;
+    width: 12px;
+    height: 12px;
+    border-radius: 6px;
+    margin: -5px 0;
+}
+QSlider::sub-page:horizontal {
+    background: #4DD0E1;
+    border-radius: 2px;
+}
+QSpinBox, QDoubleSpinBox {
+    background-color: #0F1923;
+    border: 1px solid #2E4A5A;
+    border-radius: 3px;
+    color: #4DD0E1;
+    padding: 2px 4px;
+}
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {
+    background-color: #0F3460;
+    border: 1px solid #4DD0E1;
+    width: 14px;
+}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover,
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover {
+    background-color: #4DD0E1;
+}
+QLabel {
+    color: #B0BEC5;
+}
+QScrollArea {
+    border: none;
+    background-color: transparent;
+}
+QScrollBar:vertical {
+    background-color: #0F1923;
+    width: 8px;
+    border-radius: 4px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background-color: #4DD0E1;
+    border-radius: 4px;
+    min-height: 20px;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
+"""
 
 
 # ============================================================================
@@ -641,16 +826,17 @@ class SpaceSwitcher:
 
 
 # ============================================================================
-# DASHBOARD UI
+# DASHBOARD UI  (PySide2 / Qt — cyberpunk theme)
 # ============================================================================
-class SpaceSwitchDashboard:
-    """Dockable dashboard UI for space switching."""
-    
-    def __init__(self):
+class SpaceSwitchDashboard(QtWidgets.QWidget):
+    """PySide2 dashboard for the Space Switch tool — cyberpunk theme."""
+
+    def __init__(self, parent=None):
+        super(SpaceSwitchDashboard, self).__init__(parent, QtCore.Qt.Window)
         self.switcher = SpaceSwitcher()
         self.preview_locator = None
         self.target_object = None
-        self.source_objects = []  # List of source objects for multi-source support
+        self.source_objects = []
         self.settings = {
             "space_mode": "world",
             "translate": True,
@@ -673,467 +859,564 @@ class SpaceSwitchDashboard:
             "static_threshold": 0.001,
             "auto_best_order": True,
         }
-        
+        self._fade_anim = None
+        self.baking_counter = 0
+        self.status_timer = QtCore.QTimer()
+        self.status_timer.timeout.connect(self._update_status_anim)
         self.build_ui()
     
+    # =========================================================================
+    # ANIMATION / SHOW
+    # =========================================================================
+    def showEvent(self, event):
+        """Fade the window in on first show."""
+        self.setWindowOpacity(0.0)
+        self._fade_anim = QtCore.QPropertyAnimation(self, b"windowOpacity")
+        self._fade_anim.setDuration(800)
+        self._fade_anim.setStartValue(0.0)
+        self._fade_anim.setEndValue(1.0)
+        self._fade_anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+        self._fade_anim.start()
+        super(SpaceSwitchDashboard, self).showEvent(event)
+
+    def _set_status(self, msg, animated=False):
+        """Update the status bar. Pass animated=True while baking."""
+        if animated:
+            self.baking_counter = 0
+            self.status_timer.start(300)
+        else:
+            self.status_timer.stop()
+            self.status_label.setText(msg)
+
+    def _update_status_anim(self):
+        self.baking_counter = (self.baking_counter + 1) % 4
+        dots = "·" * self.baking_counter + "  " * (3 - self.baking_counter)
+        self.status_label.setText(f"◈  BAKING{dots}")
+
+    # =========================================================================
+    # BUILD UI
+    # =========================================================================
     def build_ui(self):
-        """Build the dashboard UI."""
-        # Delete existing window if it exists
-        if cmds.window(WINDOW_NAME, exists=True):
-            cmds.deleteUI(WINDOW_NAME)
-        
+        """Build the PySide2 dashboard UI."""
         # Delete preview locator if exists
         if cmds.objExists("_SS_preview_locator"):
             cmds.delete("_SS_preview_locator")
         
-        # Create window
-        self.window = cmds.window(
-            WINDOW_NAME,
-            title=WINDOW_TITLE,
-            widthHeight=(320, 520),
-            sizeable=True
-        )
-        
-        # Main layout
-        main_layout = cmds.columnLayout(adjustableColumn=True, rowSpacing=5)
-        
-        # ===== SPACE MODE =====
-        cmds.frameLayout(label="Space Mode", collapsable=True, marginWidth=5, marginHeight=5)
-        cmds.columnLayout(adjustableColumn=True)
-        
-        # Custom Radio Collection to support 5 modes (Grp limits to 4)
-        self.mode_collection = cmds.radioCollection()
-        
-        # Row 1
-        cmds.rowLayout(numberOfColumns=3)
-        self.rb_world = cmds.radioButton(label="World", select=True, 
-                                       onCommand=partial(self._on_space_mode_change, "world"))
-        self.rb_local = cmds.radioButton(label="Local", 
-                                       onCommand=partial(self._on_space_mode_change, "local"))
-        self.rb_object = cmds.radioButton(label="Object", 
-                                        onCommand=partial(self._on_space_mode_change, "object"))
-        cmds.setParent("..")
-        
-        # Row 2
-        cmds.rowLayout(numberOfColumns=2)
-        self.rb_camera = cmds.radioButton(label="Camera", 
-                                        onCommand=partial(self._on_space_mode_change, "camera"))
-        self.rb_aim = cmds.radioButton(label="Aim", 
-                                     onCommand=partial(self._on_space_mode_change, "aim"))
-        cmds.setParent("..")
-        
-        
-        # Source Field (supports multiple objects)
-        cmds.rowLayout(numberOfColumns=3, adjustableColumn=2)
-        cmds.text(label="Source: ", width=50)
-        self.source_field = cmds.textField(editable=False, width=180,
-            annotation="Supports multiple objects. Use 'Pick' to load current selection.")
-        cmds.button(label="Pick", width=50, command=partial(self._pick_object, "source"))
-        cmds.setParent("..")
+        self.setWindowTitle(WINDOW_TITLE)
+        self.setMinimumWidth(360)
+        self.resize(400, 740)
+        self.setStyleSheet(CYBERPUNK_SS)
 
-        # Auto-populate Source from selection on load
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── Header ──────────────────────────────────────────────────────────
+        header = QtWidgets.QFrame()
+        header_layout = QtWidgets.QVBoxLayout(header)
+        header_layout.setContentsMargins(12, 10, 12, 8)
+        header_layout.setSpacing(2)
+        title_lbl = QtWidgets.QLabel("◈  SPACE  SWITCH")
+        sub_lbl   = QtWidgets.QLabel("ANIMATOR DASHBOARD  v2.0")
+        header_layout.addWidget(title_lbl)
+        header_layout.addWidget(sub_lbl)
+        header.setStyleSheet("""
+            QFrame {
+                background-color: #0A0A1E;
+                border-bottom: 2px solid #4DD0E1;
+            }
+            QLabel { background-color: transparent; }
+        """)
+        title_lbl.setStyleSheet("color:#4DD0E1; font-size:16px; font-weight:bold; letter-spacing:3px;")
+        sub_lbl.setStyleSheet("color:#546E7A; font-size:9px; letter-spacing:2px;")
+        outer.addWidget(header)
+
+        # ── Status bar ──────────────────────────────────────────────────────
+        self.status_label = QtWidgets.QLabel("◈  READY")
+        self.status_label.setStyleSheet(
+            "background-color:#0A0A1E; color:#4DD0E1; font-size:10px;"
+            " padding:4px 12px; border-bottom:1px solid #2E4A5A;"
+        )
+        outer.addWidget(self.status_label)
+
+        # ── Scrollable content ───────────────────────────────────────────────
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        content_widget = QtWidgets.QWidget()
+        self.content_layout = QtWidgets.QVBoxLayout(content_widget)
+        self.content_layout.setSpacing(8)
+        self.content_layout.setContentsMargins(8, 8, 8, 8)
+        scroll.setWidget(content_widget)
+        outer.addWidget(scroll)
+
+        self._build_space_mode_section()
+        self._build_attributes_section()
+        self._build_locator_settings_section()
+        self._build_bake_options_section()
+        self._build_workflow_section()
+        self._build_finalize_section()
+        self._build_cleanup_section()
+
+        self.content_layout.addStretch()
+
+        # Pre-populate source field from current Maya selection
         sel = cmds.ls(selection=True)
         if sel:
             self.source_objects = list(sel)
             display_text = ", ".join(sel) if len(sel) <= 3 else f"{sel[0]} ... ({len(sel)} objects)"
-            cmds.textField(self.source_field, edit=True, text=display_text)
+            self.source_field.setText(display_text)
 
-        # Target Field
-        cmds.rowLayout(numberOfColumns=3, adjustableColumn=2)
-        cmds.text(label="Target: ", width=50)
-        self.target_field = cmds.textField(editable=True, width=180) # Always enabled
-        self.target_pick_btn = cmds.button(label="Pick", width=50, command=partial(self._pick_object, "target"))
-        cmds.setParent("..")
 
-        # Object-mode target behaviour toggles
-        cmds.rowLayout(numberOfColumns=2, columnWidth2=[160, 160])
-        cmds.checkBox(
-            label="Keep Target Tether",
-            value=True,
-            annotation="Object mode: preserve the master->target parentConstraint after baking, so moving the target object drags the source stack with it.",
-            changeCommand=lambda x: self._update_setting("keep_target_tether", x)
-        )
-        cmds.checkBox(
-            label="Create Target Locator",
-            value=False,
-            annotation="Object mode: also build a locator setup for the target object, so its own locator drives it (symmetric with the source).",
-            changeCommand=lambda x: self._update_setting("create_target_locator", x)
-        )
-        cmds.setParent("..")
+    # =========================================================================
+    # SECTION BUILDERS
+    # =========================================================================
+    @staticmethod
+    def _make_section(title):
+        box = QtWidgets.QGroupBox(title)
+        layout = QtWidgets.QVBoxLayout()
+        layout.setSpacing(6)
+        layout.setContentsMargins(8, 14, 8, 8)
+        box.setLayout(layout)
+        return box, layout
 
-        cmds.setParent("..")
-        cmds.setParent("..")
-        
-        # ===== ATTRIBUTES =====
-        cmds.frameLayout(label="Attributes", collapsable=True, marginWidth=5, marginHeight=5)
-        cmds.columnLayout(adjustableColumn=True)
-        
-        cmds.rowLayout(numberOfColumns=2)
-        cmds.checkBox(
-            label="Translation", value=True,
-            changeCommand=lambda x: self._update_setting("translate", x)
-        )
-        cmds.checkBox(
-            label="Rotation", value=True,
-            changeCommand=lambda x: self._update_setting("rotate", x)
-        )
-        cmds.setParent("..")
-        
-        cmds.rowLayout(numberOfColumns=3, adjustableColumn=3)
-        cmds.text(label="Rotation Order: ")
-        self.rot_order_menu = cmds.optionMenu(
-            changeCommand=self._on_rotation_order_change
-        )
+    @staticmethod
+    def _hrow(parent_layout, spacing=6):
+        row = QtWidgets.QWidget()
+        hl = QtWidgets.QHBoxLayout(row)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(spacing)
+        parent_layout.addWidget(row)
+        return hl
+
+    @staticmethod
+    def _sep(parent_layout):
+        line = QtWidgets.QFrame()
+        line.setFrameShape(QtWidgets.QFrame.HLine)
+        line.setStyleSheet("QFrame { color: #2E4A5A; }")
+        parent_layout.addWidget(line)
+
+    def _build_space_mode_section(self):
+        box, layout = self._make_section("SPACE MODE")
+
+        # Mode radio buttons
+        self.mode_group = QtWidgets.QButtonGroup(self)
+        r1 = self._hrow(layout, spacing=12)
+        self.rb_world  = QtWidgets.QRadioButton("World");  self.rb_world.setChecked(True)
+        self.rb_local  = QtWidgets.QRadioButton("Local")
+        self.rb_object = QtWidgets.QRadioButton("Object")
+        for rb in (self.rb_world, self.rb_local, self.rb_object):
+            self.mode_group.addButton(rb); r1.addWidget(rb)
+        r1.addStretch()
+
+        r2 = self._hrow(layout, spacing=12)
+        self.rb_camera = QtWidgets.QRadioButton("Camera")
+        self.rb_aim    = QtWidgets.QRadioButton("Aim")
+        for rb in (self.rb_camera, self.rb_aim):
+            self.mode_group.addButton(rb); r2.addWidget(rb)
+        r2.addStretch()
+
+        self.rb_world.toggled.connect( lambda c: c and self._on_space_mode_change("world"))
+        self.rb_local.toggled.connect( lambda c: c and self._on_space_mode_change("local"))
+        self.rb_object.toggled.connect(lambda c: c and self._on_space_mode_change("object"))
+        self.rb_camera.toggled.connect(lambda c: c and self._on_space_mode_change("camera"))
+        self.rb_aim.toggled.connect(   lambda c: c and self._on_space_mode_change("aim"))
+
+        self._sep(layout)
+
+        # Source row
+        rs = self._hrow(layout)
+        rs.addWidget(QtWidgets.QLabel("Source:"))
+        self.source_field = QtWidgets.QLineEdit()
+        self.source_field.setPlaceholderText("Pick or select objects…")
+        self.source_field.setReadOnly(True)
+        rs.addWidget(self.source_field, 1)
+        src_pick = QtWidgets.QPushButton("PICK")
+        src_pick.setFixedWidth(52)
+        src_pick.clicked.connect(lambda: self._pick_object("source"))
+        rs.addWidget(src_pick)
+
+        # Target row
+        rt = self._hrow(layout)
+        rt.addWidget(QtWidgets.QLabel("Target: "))
+        self.target_field = QtWidgets.QLineEdit()
+        self.target_field.setPlaceholderText("Object / camera / aim target…")
+        rt.addWidget(self.target_field, 1)
+        tgt_pick = QtWidgets.QPushButton("PICK")
+        tgt_pick.setFixedWidth(52)
+        tgt_pick.clicked.connect(lambda: self._pick_object("target"))
+        rt.addWidget(tgt_pick)
+
+        # Object-mode toggles
+        ro = self._hrow(layout, spacing=10)
+        self.chk_keep_tether = QtWidgets.QCheckBox("Keep Target Tether")
+        self.chk_keep_tether.setChecked(True)
+        self.chk_keep_tether.setToolTip(
+            "Object mode: preserve master→target parentConstraint after baking "
+            "so moving the target drags the source stack.")
+        self.chk_keep_tether.toggled.connect(
+            lambda v: self._update_setting("keep_target_tether", v))
+        self.chk_create_tgt_loc = QtWidgets.QCheckBox("Create Target Locator")
+        self.chk_create_tgt_loc.setChecked(False)
+        self.chk_create_tgt_loc.setToolTip(
+            "Object mode: also build a locator setup for the target so its own "
+            "locator drives it (symmetric with source).")
+        self.chk_create_tgt_loc.toggled.connect(
+            lambda v: self._update_setting("create_target_locator", v))
+        ro.addWidget(self.chk_keep_tether)
+        ro.addWidget(self.chk_create_tgt_loc)
+        ro.addStretch()
+
+        self.content_layout.addWidget(box)
+
+    def _build_attributes_section(self):
+        box, layout = self._make_section("ATTRIBUTES")
+
+        r1 = self._hrow(layout, spacing=12)
+        self.chk_translate = QtWidgets.QCheckBox("Translation")
+        self.chk_translate.setChecked(True)
+        self.chk_translate.toggled.connect(lambda v: self._update_setting("translate", v))
+        self.chk_rotate = QtWidgets.QCheckBox("Rotation")
+        self.chk_rotate.setChecked(True)
+        self.chk_rotate.toggled.connect(lambda v: self._update_setting("rotate", v))
+        r1.addWidget(self.chk_translate)
+        r1.addWidget(self.chk_rotate)
+        r1.addStretch()
+
+        r2 = self._hrow(layout, spacing=6)
+        r2.addWidget(QtWidgets.QLabel("Rotation Order:"))
+        self.rot_order_combo = QtWidgets.QComboBox()
         for ro in ROTATION_ORDERS:
-            cmds.menuItem(label=ro.upper())
-        
-        cmds.checkBox(
-            label="Auto-Detect", 
-            value=True,
-            annotation="Automatically calculate best rotation order to avoid gimbal lock.",
-            changeCommand=lambda x: self._update_setting("auto_best_order", x)
-        )
-        cmds.setParent("..")
-        
-        cmds.setParent("..")
-        cmds.setParent("..")
-        
-        # ===== LOCATOR SETTINGS =====
-        cmds.frameLayout(label="Locator Settings", collapsable=True, marginWidth=5, marginHeight=5)
-        cmds.columnLayout(adjustableColumn=True)
-        
-        cmds.button(
-            label="Create Preview Locator",
-            command=self._create_preview_locator,
-            backgroundColor=(0.3, 0.5, 0.3)
-        )
-        
-        cmds.rowLayout(numberOfColumns=4, adjustableColumn=4, columnWidth4=[50, 40, 40, 60], columnAlign4=["left", "center", "center", "left"])
-        cmds.text(label="Scale: ", width=50)
-        cmds.button(
-            label="-", width=40,
-            command=partial(self._adj_scale, False),
-            annotation="Divide scale by factor"
-        )
-        cmds.button(
-            label="+", width=40,
-            command=partial(self._adj_scale, True),
-            annotation="Multiply scale by factor"
-        )
-        self.scale_factor_field = cmds.floatField(
-            value=1.5, precision=2, width=60,
-            annotation="Multiplication factor"
-        )
-        cmds.setParent("..")
-        
-        cmds.rowLayout(numberOfColumns=3, adjustableColumn=3)
-        cmds.text(label="Offsets: ", width=50)
-        self.offset_slider = cmds.intSliderGrp(
-            field=True,
-            minValue=1, maxValue=5, value=2,
-            changeCommand=lambda x: self._update_setting("num_offsets", int(x))
-        )
-        cmds.checkBox(
-            label="Hide Offset",
-            value=True,
-            annotation="Hide offset locator shape by default.",
-            changeCommand=lambda x: self._update_setting("hide_offset_locators", x)
-        )
-        cmds.setParent("..")
-        
-        # Color buttons
-        cmds.text(label="Color:", align="left")
-        cmds.rowLayout(numberOfColumns=8, columnWidth=[(i+1, 35) for i in range(8)])
-        
-        color_buttons = [
-            ("red", (0.8, 0.2, 0.2)),
-            ("yellow", (0.9, 0.9, 0.2)),
-            ("green", (0.2, 0.8, 0.2)),
-            ("blue", (0.2, 0.4, 0.9)),
-            ("purple", (0.6, 0.2, 0.8)),
-            ("white", (0.9, 0.9, 0.9)),
-            ("cyan", (0.2, 0.8, 0.8)),
-            ("orange", (0.9, 0.5, 0.1)),
+            self.rot_order_combo.addItem(ro.upper())
+        self.rot_order_combo.currentTextChanged.connect(self._on_rotation_order_change)
+        r2.addWidget(self.rot_order_combo)
+        self.chk_auto_order = QtWidgets.QCheckBox("Auto-Detect")
+        self.chk_auto_order.setChecked(True)
+        self.chk_auto_order.setToolTip(
+            "Automatically calculate best rotation order to avoid gimbal lock.")
+        self.chk_auto_order.toggled.connect(lambda v: self._update_setting("auto_best_order", v))
+        r2.addWidget(self.chk_auto_order)
+        r2.addStretch()
+
+        self.content_layout.addWidget(box)
+
+    def _build_locator_settings_section(self):
+        box, layout = self._make_section("LOCATOR SETTINGS")
+
+        prev_btn = QtWidgets.QPushButton("Create Preview Locator")
+        prev_btn.clicked.connect(self._create_preview_locator)
+        layout.addWidget(prev_btn)
+
+        # Scale row
+        rs = self._hrow(layout, spacing=4)
+        rs.addWidget(QtWidgets.QLabel("Scale:"))
+        minus_btn = QtWidgets.QPushButton("−")
+        minus_btn.setFixedWidth(32)
+        minus_btn.setToolTip("Divide locator scale by factor")
+        minus_btn.clicked.connect(lambda: self._adj_scale(False))
+        rs.addWidget(minus_btn)
+        plus_btn = QtWidgets.QPushButton("+")
+        plus_btn.setFixedWidth(32)
+        plus_btn.setToolTip("Multiply locator scale by factor")
+        plus_btn.clicked.connect(lambda: self._adj_scale(True))
+        rs.addWidget(plus_btn)
+        self.scale_factor_field = QtWidgets.QDoubleSpinBox()
+        self.scale_factor_field.setValue(1.5)
+        self.scale_factor_field.setDecimals(2)
+        self.scale_factor_field.setRange(0.01, 999.0)
+        self.scale_factor_field.setFixedWidth(68)
+        self.scale_factor_field.setToolTip("Multiplication / division factor")
+        rs.addWidget(self.scale_factor_field)
+        rs.addStretch()
+
+        # Offsets row
+        ro = self._hrow(layout, spacing=6)
+        ro.addWidget(QtWidgets.QLabel("Offsets:"))
+        self.offset_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.offset_slider.setRange(1, 5)
+        self.offset_slider.setValue(2)
+        self.offset_spinbox = QtWidgets.QSpinBox()
+        self.offset_spinbox.setRange(1, 5)
+        self.offset_spinbox.setValue(2)
+        self.offset_spinbox.setFixedWidth(42)
+        self.offset_slider.valueChanged.connect(self.offset_spinbox.setValue)
+        self.offset_slider.valueChanged.connect(
+            lambda v: self._update_setting("num_offsets", v))
+        self.offset_spinbox.valueChanged.connect(self.offset_slider.setValue)
+        ro.addWidget(self.offset_slider, 1)
+        ro.addWidget(self.offset_spinbox)
+        self.chk_hide_offset = QtWidgets.QCheckBox("Hide Offset")
+        self.chk_hide_offset.setChecked(True)
+        self.chk_hide_offset.setToolTip("Hide offset locator shape by default.")
+        self.chk_hide_offset.toggled.connect(
+            lambda v: self._update_setting("hide_offset_locators", v))
+        ro.addWidget(self.chk_hide_offset)
+
+        # Color swatches
+        layout.addWidget(QtWidgets.QLabel("Locator Color:"))
+        rc = self._hrow(layout, spacing=3)
+        color_swatches = [
+            ("red",    "#CC3333"), ("yellow", "#CCCC33"),
+            ("green",  "#33CC33"), ("blue",   "#3366CC"),
+            ("purple", "#9933CC"), ("white",  "#CCCCCC"),
+            ("cyan",   "#33CCCC"), ("orange", "#CC7722"),
         ]
-        
-        for color_name, rgb in color_buttons:
-            cmds.button(
-                label="",
-                width=32, height=25,
-                backgroundColor=rgb,
-                command=partial(self._on_color_select, color_name)
-            )
-        
-        cmds.setParent("..")
+        for name, hex_col in color_swatches:
+            btn = QtWidgets.QPushButton()
+            btn.setFixedSize(28, 22)
+            btn.setToolTip(name.title())
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {hex_col};
+                    border: 1px solid #555;
+                    border-radius: 2px;
+                    padding: 0;
+                }}
+                QPushButton:hover {{ border: 2px solid #4DD0E1; }}
+            """)
+            btn.clicked.connect(lambda checked=False, n=name: self._on_color_select(n))
+            rc.addWidget(btn)
+        rc.addStretch()
 
-        cmds.rowLayout(numberOfColumns=2)
-        cmds.checkBox(
-            label="Add to Display Layer",
-            value=False,
-            annotation="Add offset locators to a display layer 'SpaceSwitch_Layer'.",
-            changeCommand=lambda x: self._update_setting("add_to_display_layer", x)
-        )
-        cmds.setParent("..")
+        self.chk_display_layer = QtWidgets.QCheckBox("Add to Display Layer")
+        self.chk_display_layer.setChecked(False)
+        self.chk_display_layer.setToolTip("Add offset locators to a display layer.")
+        self.chk_display_layer.toggled.connect(
+            lambda v: self._update_setting("add_to_display_layer", v))
+        layout.addWidget(self.chk_display_layer)
 
-        cmds.setParent("..")
-        cmds.setParent("..")
-        
-        # ===== BAKE OPTIONS =====
-        cmds.frameLayout(label="Bake Options", collapsable=True, marginWidth=5, marginHeight=5)
-        cmds.columnLayout(adjustableColumn=True)
-        
-        cmds.rowLayout(numberOfColumns=3)
-        cmds.text(label="Sample By: ")
-        cmds.optionMenu(changeCommand=lambda x: self._update_setting("sample_by", int(x)))
-        cmds.menuItem(label="1")
-        cmds.menuItem(label="2")
-        cmds.menuItem(label="5")
-        cmds.menuItem(label="10")
-        cmds.checkBox(
-            label="Euler Filter", value=True,
-            changeCommand=lambda x: self._update_setting("euler_filter", x)
-        )
-        cmds.setParent("..")
-        
-        cmds.rowLayout(numberOfColumns=3)
-        cmds.checkBox(
-            label="Clean Static Keys", value=True,
-            changeCommand=lambda x: self._update_setting("clean_static", x)
-        )
-        cmds.text(label=" Threshold: ")
-        cmds.floatField(
-            value=0.001, precision=4, width=60,
-            changeCommand=lambda x: self._update_setting("static_threshold", x)
-        )
-        cmds.setParent("..")
+        self.content_layout.addWidget(box)
 
-        cmds.rowLayout(numberOfColumns=2)
-        cmds.checkBox(
-            label="Bake Master Space", 
-            value=False,
-            annotation="Bakes the Master Group and deletes its constraints before baking locators.",
-            changeCommand=lambda x: self._update_setting("bake_master_space", x)
-        )
-        cmds.setParent("..")
-        
-        cmds.rowLayout(numberOfColumns=2)
-        cmds.checkBox(
-            label="Bake Master to Anim Layer",
-            value=False,
-            annotation="If baking master space, put animation on 'Master_Space_AnimLayer'.",
-            changeCommand=lambda x: self._update_setting("bake_master_layer", x)
-        )
-        cmds.checkBox(
-            label="Bake Offset to Anim Layer",
-            value=False,
-            annotation="Put offset locator animation on 'Offset_AnimLayer'.",
-            changeCommand=lambda x: self._update_setting("bake_offset_layer", x)
-        )
-        cmds.setParent("..")
+    def _build_bake_options_section(self):
+        box, layout = self._make_section("BAKE OPTIONS")
 
-        cmds.setParent("..")
-        
-        cmds.setParent("..")
-        cmds.setParent("..")
-        
-        # ===== STAGE DROPDOWN =====
-        cmds.frameLayout(label="Workflow Stages", collapsable=False, marginWidth=5, marginHeight=5)
-        cmds.columnLayout(adjustableColumn=True, rowSpacing=5)
-        
-        cmds.rowLayout(numberOfColumns=2, adjustableColumn=1, columnWidth2=[200, 100])
-        self.stage_menu = cmds.optionMenu(label="")
-        cmds.menuItem(label="STAGE 1: Create Setup")
-        cmds.menuItem(label="STAGE 2: Bake to Locators")
-        cmds.menuItem(label="STAGE 3: Rebuild Constraints")
-        
-        cmds.button(
-            label="RUN",
-            height=30,
-            backgroundColor=(0.3, 0.5, 0.4),
-            command=self._run_selected_stage,
-            annotation="Execute the selected stage"
-        )
-        cmds.setParent("..")
-        
-        cmds.setParent("..")
-        cmds.setParent("..")
+        r1 = self._hrow(layout, spacing=6)
+        r1.addWidget(QtWidgets.QLabel("Sample By:"))
+        self.sample_combo = QtWidgets.QComboBox()
+        for v in ("1", "2", "5", "10"):
+            self.sample_combo.addItem(v)
+        self.sample_combo.currentTextChanged.connect(
+            lambda v: self._update_setting("sample_by", int(v)))
+        r1.addWidget(self.sample_combo)
+        self.chk_euler = QtWidgets.QCheckBox("Euler Filter")
+        self.chk_euler.setChecked(True)
+        self.chk_euler.toggled.connect(lambda v: self._update_setting("euler_filter", v))
+        r1.addWidget(self.chk_euler)
+        r1.addStretch()
 
-        # ===== FULL PROCESS =====
-        cmds.frameLayout(label="Main Action", collapsable=False, marginWidth=5, marginHeight=5)
-        cmds.columnLayout(adjustableColumn=True)
-        
-        cmds.button(
-            label="RUN FULL SPACE SWITCH",
-            height=50,
-            backgroundColor=(0.2, 0.6, 0.3),
-            command=self._stage_run_all,
-            annotation="Run all 3 stages in sequence"
-        )
-        cmds.setParent("..")
-        cmds.setParent("..")
-        
-        # ===== FINALIZE =====
-        cmds.frameLayout(label="Finalize Phase", collapsable=False, marginWidth=5, marginHeight=5)
-        cmds.columnLayout(adjustableColumn=True)
-        
-        cmds.button(
-            label="BAKE SOURCES DOWN",
-            height=30,
-            backgroundColor=(0.7, 0.4, 0.2),
-            command=self._bake_sources_down,
-            annotation="Bake driven sources to clean keys, run Euler filter, and remove constraints."
-        )
-        cmds.setParent("..")
-        cmds.setParent("..")
-        
-        # ===== CLEANUP =====
-        cmds.frameLayout(label="Cleanup", collapsable=True, marginWidth=5, marginHeight=5)
-        cmds.rowLayout(numberOfColumns=2, adjustableColumn=True)
-        cmds.button(
-            label="Select Locators",
-            command=self._select_locators
-        )
-        cmds.button(
-            label="Delete All",
-            backgroundColor=(0.6, 0.3, 0.3),
-            command=self._cleanup_all
-        )
-        cmds.setParent("..")
-        cmds.setParent("..")
-        
-        cmds.setParent("..")  # main_layout
-        
-        # Show window
-        cmds.showWindow(self.window)
-    
+        r2 = self._hrow(layout, spacing=6)
+        self.chk_clean_static = QtWidgets.QCheckBox("Clean Static Keys")
+        self.chk_clean_static.setChecked(True)
+        self.chk_clean_static.toggled.connect(
+            lambda v: self._update_setting("clean_static", v))
+        r2.addWidget(self.chk_clean_static)
+        r2.addWidget(QtWidgets.QLabel("Threshold:"))
+        self.threshold_spin = QtWidgets.QDoubleSpinBox()
+        self.threshold_spin.setDecimals(4)
+        self.threshold_spin.setValue(0.001)
+        self.threshold_spin.setSingleStep(0.0001)
+        self.threshold_spin.setRange(0.0, 1.0)
+        self.threshold_spin.setFixedWidth(78)
+        self.threshold_spin.valueChanged.connect(
+            lambda v: self._update_setting("static_threshold", v))
+        r2.addWidget(self.threshold_spin)
+        r2.addStretch()
+
+        self.chk_bake_master = QtWidgets.QCheckBox("Bake Master Space")
+        self.chk_bake_master.setChecked(False)
+        self.chk_bake_master.setToolTip(
+            "Bake the Master Group to curves and delete its constraints before baking locators.")
+        self.chk_bake_master.toggled.connect(
+            lambda v: self._update_setting("bake_master_space", v))
+        layout.addWidget(self.chk_bake_master)
+
+        r3 = self._hrow(layout, spacing=10)
+        self.chk_master_layer = QtWidgets.QCheckBox("Master → Anim Layer")
+        self.chk_master_layer.setChecked(False)
+        self.chk_master_layer.setToolTip(
+            "If baking master space, put animation on 'Master_Space_AnimLayer'.")
+        self.chk_master_layer.toggled.connect(
+            lambda v: self._update_setting("bake_master_layer", v))
+        self.chk_offset_layer = QtWidgets.QCheckBox("Offset → Anim Layer")
+        self.chk_offset_layer.setChecked(False)
+        self.chk_offset_layer.setToolTip("Put offset locator animation on 'Offset_AnimLayer'.")
+        self.chk_offset_layer.toggled.connect(
+            lambda v: self._update_setting("bake_offset_layer", v))
+        r3.addWidget(self.chk_master_layer)
+        r3.addWidget(self.chk_offset_layer)
+        r3.addStretch()
+
+        self.content_layout.addWidget(box)
+
+    def _build_workflow_section(self):
+        box, layout = self._make_section("WORKFLOW STAGES")
+
+        rw = self._hrow(layout, spacing=6)
+        self.stage_menu = QtWidgets.QComboBox()
+        self.stage_menu.addItem("STAGE 1: Create Setup")
+        self.stage_menu.addItem("STAGE 2: Bake to Locators")
+        self.stage_menu.addItem("STAGE 3: Rebuild Constraints")
+        rw.addWidget(self.stage_menu, 1)
+        run_stage_btn = QtWidgets.QPushButton("RUN")
+        run_stage_btn.setFixedWidth(58)
+        run_stage_btn.clicked.connect(self._run_selected_stage)
+        rw.addWidget(run_stage_btn)
+
+        self.content_layout.addWidget(box)
+
+        # Big full-run button (lives outside the groupbox for visual weight)
+        run_all_btn = QtWidgets.QPushButton("◈  RUN FULL SPACE SWITCH")
+        run_all_btn.setMinimumHeight(46)
+        run_all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0D5966;
+                border: 2px solid #4DD0E1;
+                color: #E0E0E0;
+                font-size: 13px;
+                font-weight: bold;
+                letter-spacing: 2px;
+                padding: 10px;
+                border-radius: 4px;
+                font-family: "Courier New", monospace;
+            }
+            QPushButton:hover {
+                background-color: #4DD0E1;
+                color: #0A0A1E;
+            }
+            QPushButton:pressed { background-color: #00BCD4; color: #0A0A1E; }
+        """)
+        run_all_btn.clicked.connect(self._stage_run_all)
+        self.content_layout.addWidget(run_all_btn)
+
+    def _build_finalize_section(self):
+        box, layout = self._make_section("FINALIZE")
+        bake_btn = QtWidgets.QPushButton("BAKE SOURCES DOWN")
+        bake_btn.setToolTip(
+            "Bake driven sources to clean keys, run Euler filter, and remove constraints.")
+        bake_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2E1A0A;
+                border: 1px solid #FFB74D;
+                color: #FFB74D;
+                font-weight: bold;
+                padding: 6px;
+                border-radius: 3px;
+            }
+            QPushButton:hover { background-color: #FFB74D; color: #1A1A2E; }
+            QPushButton:pressed { background-color: #FFA726; }
+        """)
+        bake_btn.clicked.connect(self._bake_sources_down)
+        layout.addWidget(bake_btn)
+        self.content_layout.addWidget(box)
+
+    def _build_cleanup_section(self):
+        box, layout = self._make_section("CLEANUP")
+        rc = self._hrow(layout, spacing=6)
+
+        sel_btn = QtWidgets.QPushButton("Select Locators")
+        sel_btn.clicked.connect(self._select_locators)
+        rc.addWidget(sel_btn, 1)
+
+        del_btn = QtWidgets.QPushButton("Delete All")
+        del_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2E0A0A;
+                border: 1px solid #FF5252;
+                color: #FF5252;
+                font-weight: bold;
+                padding: 5px;
+                border-radius: 3px;
+            }
+            QPushButton:hover { background-color: #FF5252; color: #1A1A2E; }
+            QPushButton:pressed { background-color: #E53935; }
+        """)
+        del_btn.clicked.connect(self._cleanup_all)
+        rc.addWidget(del_btn, 1)
+
+        self.content_layout.addWidget(box)
+
     # =========================================================================
     # UI CALLBACKS
     # =========================================================================
     def _update_setting(self, key, value):
-        """Update a setting value."""
         self.settings[key] = value
-    
 
-    def _on_space_mode_change(self, mode, *args):
-        """Handle space mode change."""
+    def _on_space_mode_change(self, mode):
         self.settings["space_mode"] = mode
-        
-        # Update UI interactions if needed
-        # (Target field logic is handled by validation in Stage 1)
-        pass
-
-        # Auto-populate Camera target
         if mode == "camera":
             panel = cmds.getPanel(withFocus=True)
             if panel and "modelPanel" in panel:
                 cam = cmds.modelPanel(panel, query=True, camera=True)
                 if cam:
-                    # cam might be shape or transform, get transform
                     if cmds.nodeType(cam) == "camera":
                         cam = cmds.listRelatives(cam, parent=True)[0]
-                    cmds.textField(self.target_field, edit=True, text=cam)
+                    self.target_field.setText(cam)
                     self.target_object = cam
 
-    
     def _on_rotation_order_change(self, value):
-        """Handle rotation order menu change."""
-        order_index = ROTATION_ORDERS.index(value.lower())
+        try:
+            order_index = ROTATION_ORDERS.index(value.lower())
+        except ValueError:
+            return
         self.settings["rotation_order"] = order_index
-        
-        # Update preview locator if exists
         if self.preview_locator and cmds.objExists(self.preview_locator):
             cmds.setAttr(f"{self.preview_locator}.rotateOrder", order_index)
-            
-    def _adj_scale(self, multiply=True, *args):
-        """Multiplicative scale adjustment for selected (or preview) locators."""
-        factor = cmds.floatField(self.scale_factor_field, query=True, value=True)
+
+    def _adj_scale(self, multiply=True):
+        factor = self.scale_factor_field.value()
         if factor <= 0:
             cmds.warning("Scale factor must be positive.")
             return
-
         sel = cmds.ls(selection=True)
-        
-        # If nothing selected, try to affect preview locator
         if not sel and self.preview_locator and cmds.objExists(self.preview_locator):
             target_objs = [self.preview_locator]
         else:
             target_objs = sel
-            
         if not target_objs:
-             cmds.warning("Select locators/objects to scale.")
-             return
-
+            cmds.warning("Select locators/objects to scale.")
+            return
+        scale_mult = factor if multiply else 1.0 / factor
         for obj in target_objs:
-            # Check if attributes are locked
             if cmds.getAttr(f"{obj}.scaleX", lock=True):
                 continue
-                
-            # Logic: Multiply or Divide
-            if not multiply:
-                scale_mult = 1.0 / factor
-            else:
-                scale_mult = factor
-
-            # Usually users scale the 'localScale' attr on shape for locators to avoid transform scale issues.
-            # Let's check if it's a locator.
             shapes = cmds.listRelatives(obj, shapes=True)
-            is_locator = False
-            if shapes:
-                if cmds.nodeType(shapes[0]) == "locator":
-                    is_locator = True
-                    
-            if is_locator:
-                # Scale the LOCAL scale attributes on the shape
+            if shapes and cmds.nodeType(shapes[0]) == "locator":
                 shape = shapes[0]
                 sx = cmds.getAttr(f"{shape}.localScaleX")
-                sy = cmds.getAttr(f"{shape}.localScaleY")
-                sz = cmds.getAttr(f"{shape}.localScaleZ")
-                
                 new_s = max(0.001, sx * scale_mult)
-                
                 cmds.setAttr(f"{shape}.localScaleX", new_s)
                 cmds.setAttr(f"{shape}.localScaleY", new_s)
                 cmds.setAttr(f"{shape}.localScaleZ", new_s)
             else:
-                # Standard transform scale
                 current_x = cmds.getAttr(f"{obj}.scaleX")
                 new_s = max(0.001, current_x * scale_mult)
                 cmds.scale(new_s, new_s, new_s, obj)
-                
-    def _on_color_select(self, color_name, *args):
-        """Handle color button click. Applies to SELECTION."""
+
+    def _on_color_select(self, color_name):
         color_index = LOCATOR_COLORS.get(color_name, 17)
         self.settings["color_index"] = color_index
-        
-        # Apply to selection
         sel = cmds.ls(selection=True)
-        
-        # Also update preview locator if it exists and nothing selected, or if it is selected
         if not sel and self.preview_locator and cmds.objExists(self.preview_locator):
             sel = [self.preview_locator]
-            
         if not sel:
-            cmds.inViewMessage(message=f"Color set to {color_name}. Select objects to apply.", pos="midCenter", fade=True)
+            cmds.inViewMessage(
+                message=f"Color set to {color_name}. Select objects to apply.",
+                pos="midCenter", fade=True)
             return
-
         for obj in sel:
             shapes = cmds.listRelatives(obj, shapes=True)
             if not shapes:
                 continue
-                
             for shape in shapes:
                 cmds.setAttr(f"{shape}.overrideEnabled", 1)
                 cmds.setAttr(f"{shape}.overrideColor", color_index)
-    
-    def _pick_object(self, field_type, *args):
-        """Pick object from selection for source or target field."""
+
+    def _pick_object(self, field_type):
         sel = cmds.ls(selection=True)
         if not sel:
             cmds.warning("Nothing selected to pick.")
             return
-
         if field_type == "source":
-            # Store ALL selected objects
             self.source_objects = list(sel)
             if len(sel) == 1:
                 display_text = sel[0]
@@ -1141,169 +1424,120 @@ class SpaceSwitchDashboard:
                 display_text = ", ".join(sel)
             else:
                 display_text = f"{sel[0]} ... ({len(sel)} objects)"
-            cmds.textField(self.source_field, edit=True, text=display_text)
+            self.source_field.setText(display_text)
         elif field_type == "target":
             self.target_object = sel[0]
-            cmds.textField(self.target_field, edit=True, text=sel[0])
-            
-    def _create_preview_locator(self, *args):
-        """Create a preview locator to visualize settings."""
-        # Delete existing preview
+            self.target_field.setText(sel[0])
+
+    def _create_preview_locator(self):
         if cmds.objExists("_SS_preview_locator"):
             cmds.delete("_SS_preview_locator")
-        
-        # Determine position source
-        # Priority: Source Field -> Selection -> World Center
-        source_obj = cmds.textField(self.source_field, query=True, text=True)
+        source_obj = self.source_field.text().strip()
         if not source_obj or not cmds.objExists(source_obj):
-             sel = cmds.ls(selection=True)
-             if sel:
-                 source_obj = sel[0]
-        
-        # Create preview
+            sel = cmds.ls(selection=True)
+            if sel:
+                source_obj = sel[0]
         loc = cmds.spaceLocator(name="_SS_preview_locator")[0]
         self.preview_locator = loc
-        
-        # Apply current settings
         size = self.settings["locator_size"]
         cmds.setAttr(f"{loc}.localScaleX", size)
         cmds.setAttr(f"{loc}.localScaleY", size)
         cmds.setAttr(f"{loc}.localScaleZ", size)
-        
         shape = cmds.listRelatives(loc, shapes=True)[0]
         cmds.setAttr(f"{shape}.overrideEnabled", 1)
         cmds.setAttr(f"{shape}.overrideColor", self.settings["color_index"])
-        
         cmds.setAttr(f"{loc}.rotateOrder", self.settings["rotation_order"])
-        
-        cmds.setAttr(f"{loc}.rotateOrder", self.settings["rotation_order"])
-        
-        # Match to source if available
         if source_obj and cmds.objExists(source_obj):
             cmds.matchTransform(loc, source_obj, position=True, rotation=True)
-        
         cmds.select(loc)
-    
+
     # =========================================================================
     # STAGE OPERATIONS
     # =========================================================================
     def _stage_create(self, *args):
         """Stage 1: Create locator setup for all source objects."""
-        # Get source objects - use stored list, fallback to selection
         objects_to_process = list(self.source_objects) if self.source_objects else []
-        
-        # Fallback to selection if source list is empty
         if not objects_to_process:
             sel = cmds.ls(selection=True)
             if sel:
                 objects_to_process = list(sel)
                 self.source_objects = list(sel)
-                # Auto-populate field
                 if len(sel) == 1:
                     display_text = sel[0]
                 elif len(sel) <= 3:
                     display_text = ", ".join(sel)
                 else:
                     display_text = f"{sel[0]} ... ({len(sel)} objects)"
-                cmds.textField(self.source_field, edit=True, text=display_text)
-        
-        # Validate
+                self.source_field.setText(display_text)
+
         objects_to_process = [obj for obj in objects_to_process if cmds.objExists(obj)]
         if not objects_to_process:
             cmds.warning("Please pick source object(s) or select objects.")
             return False
 
         print(f"Processing {len(objects_to_process)} source object(s): {objects_to_process}")
-        
-        # Delete preview locator
+
         if cmds.objExists("_SS_preview_locator"):
             cmds.delete("_SS_preview_locator")
             self.preview_locator = None
-        
-        # Clear previous data
-        self.switcher = SpaceSwitcher()
-        
-        # Query UI state directly for robustness
-        effective_mode = self.settings.get("space_mode", "world")
 
-        # Validate target
+        self.switcher = SpaceSwitcher()
+
+        effective_mode = self.settings.get("space_mode", "world")
         if effective_mode in ["object", "camera", "aim"]:
-            target_obj_name = cmds.textField(self.target_field, query=True, text=True)
+            target_obj_name = self.target_field.text().strip()
             if not target_obj_name or not cmds.objExists(target_obj_name):
-                 cmds.warning(f"{effective_mode.title()} mode requires a valid Target object.")
-                 return False
+                cmds.warning(f"{effective_mode.title()} mode requires a valid Target object.")
+                return False
             self.target_object = target_obj_name
-                
-                
+
         for obj in objects_to_process:
-            
-            # Auto-detect best rotation order if enabled
             rot_order = self.settings["rotation_order"]
             if self.settings["auto_best_order"]:
                 start = cmds.playbackOptions(q=True, min=True)
-                end = cmds.playbackOptions(q=True, max=True)
-                best_order = self.switcher.get_best_rotation_order(obj, start, end)
-                if best_order is not None:
-                    rot_order = best_order
-                    # Update menu to reflect choice (optional, might be confusing if batching)
-                    # cmds.optionMenu(self.rot_order_menu, edit=True, select=best_order+1)
+                end   = cmds.playbackOptions(q=True, max=True)
+                best  = self.switcher.get_best_rotation_order(obj, start, end)
+                if best is not None:
+                    rot_order = best
 
-            # Create locator hierarchy with MASTER logic
             top_group, locator, master = self.switcher.create_locator_hierarchy(
                 source_obj=obj,
-                target_obj=self.target_object, # Pass strict target (or None)
-                mode=effective_mode,    # Pass mode so master constraints are built
+                target_obj=self.target_object,
+                mode=effective_mode,
                 num_offsets=self.settings["num_offsets"],
                 locator_size=self.settings["locator_size"],
                 color_index=self.settings["color_index"],
                 rotation_order=rot_order,
                 hide_offset=self.settings.get("hide_offset_locators", True)
             )
-            
             if not top_group:
-                 continue
+                continue
 
-            
-            # Create temporary constraints to TOP_GROUP for baking
-            # The MASTER above it is already constrained to the space
-            # So we just constrain top_group to Source to capture motion relative to Master
-            
             self.switcher.create_temp_constraints(
                 obj, top_group,
                 translate=self.settings["translate"],
                 rotate=self.settings["rotate"]
             )
-            
-            # Check for rig_layer
+
             if cmds.objExists("rig_layer"):
                 cmds.editDisplayLayerMembers("rig_layer", master, noRecurse=True)
-            
-            # 4. Handle Display Layer
+
             if self.settings["add_to_display_layer"]:
                 base_name = self._get_base_name(obj)
+                self._add_to_display_layer([master],          f"{base_name}_Master_DL", color=13)
+                self._add_to_display_layer([locator, top_group], f"{base_name}_Offset_DL", color=6)
 
-                # Create separate layers for Master and Offset with distinct names and colors
-                # Master -> Red (13), Offset -> Blue (6)
-                master_layer = f"{base_name}_Master_DL"
-                offset_layer = f"{base_name}_Offset_DL"
-
-                self._add_to_display_layer([master], master_layer, color=13)
-                self._add_to_display_layer([locator, top_group], offset_layer, color=6)
-
-        # Optional: also build a locator setup for the TARGET (Object mode only).
-        # Target gets its own world-space hierarchy; its locator drives the target
-        # via Stage 3 rebuild. Combined with Keep Target Tether, moving the target
-        # locator propagates through target -> source master -> source stack.
+        # Optional target-locator setup (Object mode only)
         if (effective_mode == "object"
                 and self.settings.get("create_target_locator", False)
                 and self.target_object
                 and cmds.objExists(self.target_object)):
-            target = self.target_object
-            t_rot = self.settings["rotation_order"]
+            target  = self.target_object
+            t_rot   = self.settings["rotation_order"]
             if self.settings["auto_best_order"]:
                 start = cmds.playbackOptions(q=True, min=True)
-                end = cmds.playbackOptions(q=True, max=True)
-                best = self.switcher.get_best_rotation_order(target, start, end)
+                end   = cmds.playbackOptions(q=True, max=True)
+                best  = self.switcher.get_best_rotation_order(target, start, end)
                 if best is not None:
                     t_rot = best
 
@@ -1317,66 +1551,52 @@ class SpaceSwitchDashboard:
                 rotation_order=t_rot,
                 hide_offset=self.settings.get("hide_offset_locators", True)
             )
-
             if t_top:
-                # Tag so bake/cleanup paths can distinguish target setups
                 self.switcher.created_locators[-1]["is_target_setup"] = True
-
-                # Bake target's world motion onto its top_group
                 self.switcher.create_temp_constraints(
                     target, t_top,
                     translate=self.settings["translate"],
                     rotate=self.settings["rotate"]
                 )
-
                 if cmds.objExists("rig_layer"):
                     cmds.editDisplayLayerMembers("rig_layer", t_master, noRecurse=True)
-
                 if self.settings["add_to_display_layer"]:
                     t_base = self._get_base_name(target)
-                    self._add_to_display_layer([t_master], f"{t_base}_Master_DL", color=13)
-                    self._add_to_display_layer([t_loc, t_top], f"{t_base}_Offset_DL", color=6)
+                    self._add_to_display_layer([t_master],          f"{t_base}_Master_DL", color=13)
+                    self._add_to_display_layer([t_loc, t_top], f"{t_base}_Offset_DL",  color=6)
 
-        # Select the created locators
         top_groups = [data["top_group"] for data in self.switcher.created_locators]
         cmds.select(top_groups)
-        
+        self._set_status(f"◈  CREATED {len(top_groups)} SETUP(S)")
+        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
         cmds.inViewMessage(
             message=f"Created {len(top_groups)} locator setup(s). Ready for baking.",
-            pos="midCenter", fade=True
-        )
+            pos="midCenter", fade=True)
         return True
-    
+
     def _stage_bake(self, *args):
         """Stage 2: Bake animation to locators."""
         if not self.switcher.created_locators:
             cmds.warning("No locators to bake. Run Stage 1 first.")
             return False
-        
+
+        self._set_status("◈  BAKING", animated=True)
+        QtWidgets.QApplication.processEvents()
+
         sample_by    = self.settings["sample_by"]
         euler_filter = self.settings["euler_filter"]
 
-        # Group by base name (for per-object anim layer naming)
         grouped_data = {}
         for data in self.switcher.created_locators:
             base = self._get_base_name(data["source"])
             grouped_data.setdefault(base, []).append(data)
 
-        # ── Phase 1: Bake ALL masters together (if enabled) ───────────────────
-        # All master constraints must stay live until ALL masters are baked.
-        # keep_target_tether overrides bake_master_space: if the user wants
-        # master<-target to remain live after baking, there's no point baking
-        # those channels to curves and then severing the constraint.
-        keep_tether = self.settings.get("keep_target_tether", True)
-        should_bake_master = (
-            self.settings.get("bake_master_space", False)
-            and not keep_tether
-        )
+        # Phase 1: optionally bake masters
+        keep_tether        = self.settings.get("keep_target_tether", True)
+        should_bake_master = self.settings.get("bake_master_space", False) and not keep_tether
         if should_bake_master:
-            # Exclude target-setup masters (world-space, no target constraint to collapse)
             all_masters = [d["master"] for d in self.switcher.created_locators
                            if not d.get("is_target_setup", False)]
-
             if self.settings["bake_master_layer"]:
                 for base_name, data_list in grouped_data.items():
                     grp_masters = [d["master"] for d in data_list
@@ -1387,23 +1607,14 @@ class SpaceSwitchDashboard:
                     if layer:
                         cmds.select(grp_masters)
                         cmds.animLayer(layer, edit=True, addSelectedObjects=True)
-
             self.switcher.bake_animation(
-                all_masters,
-                sample_by=sample_by,
-                euler_filter=euler_filter,
-                cleanup_constraints=False,  # keep temp constraints live
-                destination_layer=None
-            )
-            # All masters baked -- now safe to release their constraints
+                all_masters, sample_by=sample_by, euler_filter=euler_filter,
+                cleanup_constraints=False, destination_layer=None)
             for master in all_masters:
                 self.switcher._delete_constraints_on_node(master)
 
-        # ── Phase 2: Bake ALL top_groups in one single batch ──────────────────
-        # Collecting everything before calling bakeResults ensures every
-        # temp constraint is still live when the bake evaluates each frame.
+        # Phase 2: bake all top_groups
         all_top_groups = [d["top_group"] for d in self.switcher.created_locators]
-
         if self.settings["bake_offset_layer"]:
             for base_name, data_list in grouped_data.items():
                 grp_tops = [d["top_group"] for d in data_list]
@@ -1411,223 +1622,162 @@ class SpaceSwitchDashboard:
                 if layer:
                     cmds.select(grp_tops)
                     cmds.animLayer(layer, edit=True, addSelectedObjects=True)
-
-        # One bakeResults call for all top_groups -- constraints deleted after
         self.switcher.bake_animation(
-            all_top_groups,
-            sample_by=sample_by,
-            euler_filter=euler_filter,
-            cleanup_constraints=True,  # delete all temp constraints after bake
-            destination_layer=None
-        )
+            all_top_groups, sample_by=sample_by, euler_filter=euler_filter,
+            cleanup_constraints=True, destination_layer=None)
 
-        # ── Phase 3: Per-group post-bake cleanup ──────────────────────────────
+        # Phase 3: clean static keys
         if self.settings["clean_static"]:
             for base_name, data_list in grouped_data.items():
                 self.switcher.cleanup_keys(
                     [d["top_group"] for d in data_list],
-                    self.settings["static_threshold"]
-                )
+                    self.settings["static_threshold"])
 
         locators = [d["locator"] for d in self.switcher.created_locators]
         cmds.select(locators)
+        self._set_status(f"◈  BAKED {len(all_top_groups)} LOCATOR(S)")
+        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
         cmds.inViewMessage(
             message=f"Baked {len(all_top_groups)} locator(s). Ready for adjustments.",
-            pos="midCenter", fade=True
-        )
+            pos="midCenter", fade=True)
         return True
-    
+
     def _stage_rebuild(self, *args):
-        """Stage 3: Apply locator -> source constraints. Sources are now driven by locators."""
+        """Stage 3: Apply locator -> source constraints."""
         if not self.switcher.created_locators:
             cmds.warning("No locator data. Run Stage 1 and 2 first.")
             return False
-        
-        # Apply constraints: locators drive sources (constraints are kept)
         self.switcher.rebuild_constraints(
             translate=self.settings["translate"],
             rotate=self.settings["rotate"],
-            maintain_offset=False
-        )
-        
+            maintain_offset=False)
         sources = [data["source"] for data in self.switcher.created_locators]
-        
         cmds.select(sources)
+        self._set_status("◈  REBUILD COMPLETE")
+        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
         cmds.inViewMessage(
             message="Stage 3 complete. Sources are now driven by locators.",
-            pos="midCenter", fade=True
-        )
+            pos="midCenter", fade=True)
         return True
-        
-    def _stage_run_all(self, *args):
-        """Run all stages in sequence. Sources end up with clean keys, identical positions."""
-        # Record the current frame to restore at the end
-        current_frame = cmds.currentTime(query=True)
 
+    def _stage_run_all(self, *args):
+        """Run all 3 stages in sequence."""
+        current_frame = cmds.currentTime(query=True)
         if not self._stage_create():
             return
-        
-        # Force a refresh to ensure Maya processes the creation
         cmds.refresh()
-        
         if not self._stage_bake():
             return
-            
         if not self._stage_rebuild():
             return
-        
-        # Return to the frame the user was on before baking
         cmds.currentTime(current_frame)
-
-        # Select the baked offset locators (top_groups) — the animator's handles
         if self.switcher.created_locators:
-            top_groups = [data["top_group"] for data in self.switcher.created_locators
-                          if cmds.objExists(data["top_group"])]
+            top_groups = [d["top_group"] for d in self.switcher.created_locators
+                          if cmds.objExists(d["top_group"])]
             if top_groups:
                 cmds.select(top_groups)
-        
+        self._set_status("◈  SPACE SWITCH COMPLETE")
+        QtCore.QTimer.singleShot(4000, lambda: self._set_status("◈  READY"))
         cmds.inViewMessage(
-            message="FULL SPACE SWITCH COMPLETE! Offset locators selected.",
-            pos="midCenter", fade=True, pivot=[0,0]
-        )
+            message="FULL SPACE SWITCH COMPLETE!  Offset locators selected.",
+            pos="midCenter", fade=True)
 
     def _run_selected_stage(self, *args):
-        """Run the stage selected in the optionMenu."""
-        selection = cmds.optionMenu(self.stage_menu, query=True, value=True)
-        
+        selection = self.stage_menu.currentText()
         if "STAGE 1" in selection:
             self._stage_create()
         elif "STAGE 2" in selection:
             self._stage_bake()
         elif "STAGE 3" in selection:
             self._stage_rebuild()
-            
+
     def _bake_sources_down(self, *args):
-        """Bake the actively driven sources back to normal keys and remove constraints."""
         if not self.switcher.created_locators:
             cmds.warning("No locator data. Run the Space Switch process first.")
             return
-            
-        sources = [data["source"] for data in self.switcher.created_locators if cmds.objExists(data["source"])]
+        sources = [d["source"] for d in self.switcher.created_locators
+                   if cmds.objExists(d["source"])]
         if not sources:
             cmds.warning("No valid sources found to bake.")
             return
-            
-        # Bake down the sources (which also applies the euler filter per global settings!)
+        self._set_status("◈  BAKING SOURCES", animated=True)
+        QtWidgets.QApplication.processEvents()
         self.switcher.bake_source_animation(
             sources,
             sample_by=self.settings["sample_by"],
             euler_filter=self.settings["euler_filter"],
             clean_static=self.settings["clean_static"],
-            threshold=self.settings["static_threshold"]
-        )
-        
-        # Release the constraints
+            threshold=self.settings["static_threshold"])
         for s in sources:
             self.switcher._delete_constraints_on_node(s)
-            
         cmds.select(sources)
+        self._set_status("◈  SOURCES BAKED DOWN")
+        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
         cmds.inViewMessage(
-            message="Sources baked down and filtered successfully! Constraints removed.",
-            pos="midCenter", fade=True
-        )
-    
+            message="Sources baked down and filtered. Constraints removed.",
+            pos="midCenter", fade=True)
+
     # =========================================================================
     # CLEANUP
     # =========================================================================
     def _select_locators(self, *args):
-        """Select all created locators."""
         if self.switcher.created_locators:
-            locators = [data["top_group"] for data in self.switcher.created_locators]
-            existing = [loc for loc in locators if cmds.objExists(loc)]
+            locators = [d["top_group"] for d in self.switcher.created_locators]
+            existing = [l for l in locators if cmds.objExists(l)]
             if existing:
                 cmds.select(existing)
             else:
                 cmds.warning("No locators found in scene.")
         else:
-            # Try to find by naming convention
             all_locs = cmds.ls("*" + LOCATOR_SUFFIX, type="transform")
             if all_locs:
                 cmds.select(all_locs)
             else:
                 cmds.warning("No space switch locators found.")
-    
+
     def _cleanup_all(self, *args):
-        """Delete all locators (constraints first to prevent pop)."""
-        
-        # Identify layers to delete based on the known locators
         layers_to_delete = set()
-        
         if self.switcher.created_locators:
             for data in self.switcher.created_locators:
-                source = data["source"]
-                base_name = self._get_base_name(source)
-                
-                # Add potential layer names
-                layers_to_delete.add(f"{base_name}_Master_DL")
-                layers_to_delete.add(f"{base_name}_Offset_DL")
-                layers_to_delete.add(f"{base_name}_Master_AL")
-                layers_to_delete.add(f"{base_name}_Offset_AL")
-        
-        # Delete the layers if they exist
+                base_name = self._get_base_name(data["source"])
+                layers_to_delete.update([
+                    f"{base_name}_Master_DL", f"{base_name}_Offset_DL",
+                    f"{base_name}_Master_AL", f"{base_name}_Offset_AL",
+                ])
         for layer in layers_to_delete:
             if cmds.objExists(layer):
                 try:
                     cmds.delete(layer)
                 except Exception as e:
                     print(f"Could not delete layer {layer}: {e}")
-
         self.switcher.cleanup(delete_constraints_first=True)
-        
-        # Also delete any preview locator
         if cmds.objExists("_SS_preview_locator"):
             cmds.delete("_SS_preview_locator")
-        
+        self._set_status("◈  CLEANUP COMPLETE")
+        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
         cmds.inViewMessage(
             message="Cleanup complete. Layers, constraints, and locators deleted.",
-            pos="midCenter", fade=True
-        )
+            pos="midCenter", fade=True)
 
+    # =========================================================================
+    # UTILITIES
+    # =========================================================================
     def _get_base_name(self, node_name):
-        """
-        Derive base name from node name.
-        Removes namespaces and '_CTL' suffix.
-        """
-        # Strip namespace
         short_name = node_name.split(":")[-1].split("|")[-1]
-        
-        # Strip _CTL (case insensitive)
         if short_name.lower().endswith("_ctl"):
-            base = short_name[:-4]
-        else:
-            base = short_name
-            
-        return base
+            return short_name[:-4]
+        return short_name
 
     def _add_to_display_layer(self, nodes, layer_name="SpaceSwitch_Layer", color=None):
-        """
-        Add nodes to a display layer, creating it if necessary.
-        
-        Args:
-            nodes: List of nodes to add
-            layer_name: Name of the layer
-            color: Optional color index (1-32) to set on the layer
-        """
         if not cmds.objExists(layer_name):
             cmds.createDisplayLayer(name=layer_name, empty=True)
-            # Make the layer visible and normal type
             cmds.setAttr(f"{layer_name}.displayType", 0)
-            
             if color is not None:
                 cmds.setAttr(f"{layer_name}.color", color)
-            
-        # Add members
         cmds.editDisplayLayerMembers(layer_name, nodes, noRecurse=False)
 
     def _get_or_create_anim_layer(self, layer_name):
-        """Get or create an animation layer."""
         if not cmds.objExists(layer_name):
-            # Create anim layer
             return cmds.animLayer(layer_name)
         return layer_name
 
@@ -1635,17 +1785,27 @@ class SpaceSwitchDashboard:
 # ============================================================================
 # LAUNCH
 # ============================================================================
-# Global variable to hold the window instance and prevent GC
 _space_switch_ui_instance = None
 
 def show():
-    """Show the Space Switch Dashboard."""
+    """Show the Space Switch Dashboard (creates or re-raises the window)."""
     global _space_switch_ui_instance
-    _space_switch_ui_instance = SpaceSwitchDashboard()
+    # Close any existing instance cleanly
+    if _space_switch_ui_instance is not None:
+        try:
+            _space_switch_ui_instance.close()
+            _space_switch_ui_instance.deleteLater()
+        except Exception:
+            pass
+    parent = _maya_main_window()
+    _space_switch_ui_instance = SpaceSwitchDashboard(parent=parent)
+    _space_switch_ui_instance.show()
+    _space_switch_ui_instance.raise_()
+    _space_switch_ui_instance.activateWindow()
     return _space_switch_ui_instance
 
 
-# Run on import/execute
+# Run on import / paste into Script Editor
 if __name__ == "__main__":
     show()
 else:
