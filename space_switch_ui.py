@@ -16,15 +16,6 @@ Auto-reloads when re-run for fast iteration during development.
 """
 
 # ============================================================================
-# AUTO-RELOAD FOR FAST ITERATION
-# ============================================================================
-import sys
-
-_MODULE_NAME = "space_switch_dashboard"
-if _MODULE_NAME in sys.modules:
-    del sys.modules[_MODULE_NAME]
-
-# ============================================================================
 # IMPORTS
 # ============================================================================
 import maya.cmds as cmds
@@ -284,40 +275,42 @@ class SpaceSwitcher:
             5: om.MTransformationMatrix.kZYX
         }
         
-        # Track the max deviation (score) for each order. 
+        # Track the max deviation (score) for each order.
         # Score = Max value of abs(middle_axis_angle). Lower is better (further from 90 deg/1.57 rad).
         scores = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0}
-        
-        # Sample frames
-        frames = range(int(start_time), int(end_time) + 1)
-        
-        print(f"Analyzing {len(frames)} frames for best rotation order on '{source_obj}'...")
 
+        # Sample frames — stride large ranges so long shots stay fast.
+        all_frames = list(range(int(start_time), int(end_time) + 1))
+        MAX_SAMPLES = 200
+        if len(all_frames) > MAX_SAMPLES:
+            stride = max(1, len(all_frames) // MAX_SAMPLES)
+            frames = all_frames[::stride]
+            # Always include the last frame so we don't miss end-of-shot poses.
+            if frames[-1] != all_frames[-1]:
+                frames.append(all_frames[-1])
+        else:
+            frames = all_frames
+
+        print(f"Analyzing {len(frames)} frames (of {len(all_frames)}) for best rotation "
+              f"order on '{source_obj}'...")
+
+        world_attr = f"{source_obj}.worldMatrix[0]"
         for t in frames:
             try:
-                # Get World Matrix at frame t
-                mat_list = cmds.getAttr(f"{source_obj}.worldMatrix[0]", time=t)
-                mat = om.MMatrix(mat_list)
-                
+                # Get World Matrix at frame t — ONCE per frame, reuse across all six orders.
+                mat = om.MMatrix(cmds.getAttr(world_attr, time=t))
+                base_euler = om.MTransformationMatrix(mat).rotation()  # default XYZ
+
                 for order_idx, middle_axis_idx in middle_axis_map.items():
-                    # Create a transformation matrix from the world matrix
-                    tm = om.MTransformationMatrix(mat)
-                    
-                    # Reorder to the target rotation order to see what the curves would look like
-                    # use mapped constant, not the 0-5 index directly
-                    tm.reorderRotation(om_order_map[order_idx])
-                    
-                    # Get the Euler rotation
-                    euler = tm.rotation()
-                    
-                    # Check the value of the middle axis (radians)
-                    mid_val = abs(euler[middle_axis_idx])
-                    
-                    # We want to minimize the worst-case (highest) value of the middle axis
-                    # closer to 0 is better. closer to PI/2 (1.57) is bad.
+                    # Copy + reorder; cheap compared to rebuilding the full transform.
+                    e = om.MEulerRotation(base_euler)
+                    e.reorderIt(om_order_map[order_idx])
+
+                    # Middle axis value in radians — closer to 0 is better, PI/2 is gimbal.
+                    mid_val = abs(e[middle_axis_idx])
                     if mid_val > scores[order_idx]:
                         scores[order_idx] = mid_val
-                        
+
             except Exception as e:
                 print(f"Error analyzing frame {t}: {e}")
                 continue
@@ -700,16 +693,26 @@ class SpaceSwitcher:
                         kwargs["skip"] = skip_r
                     cmds.orientConstraint(locator, source, **kwargs)
     
-    def bake_source_animation(self, sources, sample_by=1, euler_filter=True, 
-                              clean_static=True, threshold=0.001):
+    def bake_source_animation(self, sources, sample_by=1, euler_filter=True,
+                              clean_static=True, threshold=0.001,
+                              delete_constraints=False):
         """
-        Bake down the source objects' animation keys to capture their current 
-        motion (driven by locators), and perform cleanup to remove redundant 
-        or idle keys.
+        Bake down the source objects' animation keys to capture their current
+        motion (driven by locators), and optionally clean up and release.
+
+        Args:
+            sources: Iterable of object names to bake.
+            sample_by: Bake sample stride.
+            euler_filter: Run filterCurve after bake.
+            clean_static: Remove redundant / static keys after bake.
+            threshold: Tolerance passed to cleanup_keys.
+            delete_constraints: If True, remove constraints on each source
+                after baking (the "bake and release" flow — leaves clean
+                world-space keys with no locator dependency).
         """
         if not sources:
             return
-            
+
         valid_sources = [s for s in sources if cmds.objExists(s)]
         if not valid_sources:
             return
@@ -719,7 +722,6 @@ class SpaceSwitcher:
 
         cmds.refresh(suspend=True)
         try:
-            # Bake the sources based on what's driving them
             cmds.bakeResults(
                 valid_sources,
                 simulation=True,
@@ -731,20 +733,23 @@ class SpaceSwitcher:
                 minimizeRotation=True,
                 controlPoints=False
             )
-            
-            # Apply Euler filter if requested
+
+            if delete_constraints:
+                for s in valid_sources:
+                    self._delete_constraints_on_node(s)
+
             if euler_filter:
                 cmds.select(valid_sources)
                 cmds.filterCurve()
-                
-            # Clean static/redundant keys on the baked sources
+
             if clean_static:
                 self.cleanup_keys(valid_sources, threshold)
-                
+
         finally:
             cmds.refresh(suspend=False)
-            
-        print(f"[SpaceSwitch] Baked and cleaned source animation for {len(valid_sources)} object(s).")
+
+        tag = "released" if delete_constraints else "cleaned"
+        print(f"[SpaceSwitch] Baked and {tag} animation on {len(valid_sources)} source(s).")
     
     def cleanup(self, delete_constraints_first=True):
         """
@@ -782,48 +787,6 @@ class SpaceSwitcher:
             for c in constraints:
                 if cmds.objExists(c):
                     cmds.delete(c)
-
-    def bake_sources_from_constraints(self, sample_by=1, euler_filter=True):
-        """
-        After rebuild_constraints has been called, bake the source objects
-        back to clean keyframes from the locator constraints, then delete
-        those constraints. This leaves sources with world-space keys that
-        are identical to their original positions — no constraints remain.
-        """
-        sources = [d["source"] for d in self.created_locators
-                   if cmds.objExists(d["source"])]
-        if not sources:
-            return
-
-        start_time = cmds.playbackOptions(query=True, minTime=True)
-        end_time   = cmds.playbackOptions(query=True, maxTime=True)
-
-        cmds.refresh(suspend=True)
-        try:
-            cmds.bakeResults(
-                sources,
-                simulation=True,
-                time=(start_time, end_time),
-                sampleBy=sample_by,
-                disableImplicitControl=True,
-                preserveOutsideKeys=True,
-                sparseAnimCurveBake=False,
-                minimizeRotation=True,
-                controlPoints=False
-            )
-            # Delete the constraints we just baked from
-            for source in sources:
-                self._delete_constraints_on_node(source)
-
-            if euler_filter:
-                cmds.select(sources)
-                cmds.filterCurve()
-        finally:
-            cmds.refresh(suspend=False)
-
-        print(f"[SpaceSwitch] Baked and released {len(sources)} source(s). "
-              "Original motion preserved as clean keyframes.")
-
 
 # ============================================================================
 # DASHBOARD UI  (PySide2 / Qt — cyberpunk theme)
@@ -869,14 +832,16 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
     # ANIMATION / SHOW
     # =========================================================================
     def showEvent(self, event):
-        """Fade the window in on first show."""
-        self.setWindowOpacity(0.0)
-        self._fade_anim = QtCore.QPropertyAnimation(self, b"windowOpacity")
-        self._fade_anim.setDuration(800)
-        self._fade_anim.setStartValue(0.0)
-        self._fade_anim.setEndValue(1.0)
-        self._fade_anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
-        self._fade_anim.start()
+        """Fade the window in on first show only (not on restore/activate)."""
+        if not getattr(self, "_faded_in", False):
+            self.setWindowOpacity(0.0)
+            self._fade_anim = QtCore.QPropertyAnimation(self, b"windowOpacity")
+            self._fade_anim.setDuration(800)
+            self._fade_anim.setStartValue(0.0)
+            self._fade_anim.setEndValue(1.0)
+            self._fade_anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+            self._fade_anim.start()
+            self._faded_in = True
         super(SpaceSwitchDashboard, self).showEvent(event)
 
     def _set_status(self, msg, animated=False):
@@ -1707,9 +1672,8 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             sample_by=self.settings["sample_by"],
             euler_filter=self.settings["euler_filter"],
             clean_static=self.settings["clean_static"],
-            threshold=self.settings["static_threshold"])
-        for s in sources:
-            self.switcher._delete_constraints_on_node(s)
+            threshold=self.settings["static_threshold"],
+            delete_constraints=True)
         cmds.select(sources)
         self._set_status("◈  SOURCES BAKED DOWN")
         QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
@@ -1805,8 +1769,7 @@ def show():
     return _space_switch_ui_instance
 
 
-# Run on import / paste into Script Editor
+# Run on Script Editor paste (execbuffer runs as __main__).
+# Importing as a module will NOT auto-show — callers must invoke show() themselves.
 if __name__ == "__main__":
-    show()
-else:
     show()
