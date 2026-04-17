@@ -55,9 +55,6 @@ LOCATOR_SUFFIX = "_SS_loc"
 OFFSET_SUFFIX = "_offset"
 GIMBAL_SUFFIX = "_gimbal"
 
-# Color palette for locators (Maya override colors) — derived from LOCATOR_COLOR_SWATCHES
-LOCATOR_COLORS = {name: idx for name, idx, _ in LOCATOR_COLOR_SWATCHES}
-
 ROTATION_ORDERS = ["xyz", "yzx", "zxy", "xzy", "yxz", "zyx"]
 
 __version__ = "2.0"
@@ -73,6 +70,9 @@ LOCATOR_COLOR_SWATCHES = [
     ("cyan",   18, "#33CCCC"),
     ("orange", 21, "#CC7722"),
 ]
+
+# Color palette for locators (Maya override colors) — derived from LOCATOR_COLOR_SWATCHES
+LOCATOR_COLORS = {name: idx for name, idx, _ in LOCATOR_COLOR_SWATCHES}
 
 # ============================================================================
 # CYBERPUNK STYLESHEET
