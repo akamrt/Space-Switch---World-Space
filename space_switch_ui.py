@@ -12,7 +12,6 @@ THREE-STAGE WORKFLOW:
     2. BAKE    - Bake animation to locators with cleanup
     3. REBUILD - Apply constraints back to original objects
 
-Auto-reloads when re-run for fast iteration during development.
 """
 
 # ============================================================================
@@ -56,19 +55,24 @@ LOCATOR_SUFFIX = "_SS_loc"
 OFFSET_SUFFIX = "_offset"
 GIMBAL_SUFFIX = "_gimbal"
 
-# Color palette for locators (Maya override colors)
-LOCATOR_COLORS = {
-    "red": 13,
-    "yellow": 17,
-    "green": 14,
-    "blue": 6,
-    "purple": 9,
-    "white": 16,
-    "cyan": 18,
-    "orange": 21,
-}
+# Color palette for locators (Maya override colors) — derived from LOCATOR_COLOR_SWATCHES
+LOCATOR_COLORS = {name: idx for name, idx, _ in LOCATOR_COLOR_SWATCHES}
 
 ROTATION_ORDERS = ["xyz", "yzx", "zxy", "xzy", "yxz", "zyx"]
+
+__version__ = "2.0"
+
+# (name, Maya override-color index, hex swatch for the UI button)
+LOCATOR_COLOR_SWATCHES = [
+    ("red",    13, "#CC3333"),
+    ("yellow", 17, "#CCCC33"),
+    ("green",  14, "#33CC33"),
+    ("blue",    6, "#3366CC"),
+    ("purple",  9, "#9933CC"),
+    ("white",  16, "#CCCCCC"),
+    ("cyan",   18, "#33CCCC"),
+    ("orange", 21, "#CC7722"),
+]
 
 # ============================================================================
 # CYBERPUNK STYLESHEET
@@ -440,19 +444,11 @@ class SpaceSwitcher:
         self.created_locators.append({
             "source": source_obj,
             "locator": locator,
-            "top_group": top_offset, # The one defined as baked target
+            "top_group": top_offset,
             "master": master_grp,
-            "hierarchy": self._get_hierarchy(master_grp)
         })
         
         return top_offset, locator, master_grp
-    
-    def _get_hierarchy(self, top_node):
-        """Get all nodes in the hierarchy."""
-        hierarchy = [top_node]
-        children = cmds.listRelatives(top_node, allDescendents=True, type="transform") or []
-        hierarchy.extend(children)
-        return hierarchy
     
     def create_temp_constraints(self, source_obj, target_node, translate=True, rotate=True):
         """
@@ -476,26 +472,6 @@ class SpaceSwitcher:
         
         self.temp_constraints.extend(constraints)
         return constraints
-    
-    def create_aim_constraint(self, source_obj, target_node, aim_target_obj):
-        """
-        Create aim constraint for object space aiming.
-        
-        Args:
-            source_obj: The source object (for reference)
-            target_node: The node to constrain (should be top_group)
-            aim_target_obj: The object to aim at
-        """
-        ac = cmds.aimConstraint(
-            aim_target_obj, target_node,
-            maintainOffset=False,
-            aimVector=(0, 0, 1),
-            upVector=(0, 1, 0),
-            worldUpType="vector",
-            worldUpVector=(0, 1, 0)
-        )[0]
-        self.temp_constraints.append(ac)
-        return ac
     
     def bake_animation(self, locators, sample_by=1, euler_filter=True, cleanup_constraints=True, destination_layer=None):
         """
@@ -565,72 +541,54 @@ class SpaceSwitcher:
         Clean up animation curves:
         1. Remove redundant keys (linearize holds).
         2. Remove fully static channels.
-        
-        Args:
-            locators: List of locator names
-            threshold: Tolerance for considering values as static/equal
         """
         attrs = ["translateX", "translateY", "translateZ",
                  "rotateX", "rotateY", "rotateZ",
                  "scaleX", "scaleY", "scaleZ", "visibility"]
-        
+
         for loc in locators:
             if not cmds.objExists(loc):
                 continue
-                
+
             for attr in attrs:
-                attr_path = f"{loc}.{attr}"
-                
-                # Get animation curve
-                anim_curve_list = cmds.listConnections(attr_path, type="animCurve")
+                anim_curve_list = cmds.listConnections(f"{loc}.{attr}", type="animCurve")
                 if not anim_curve_list:
                     continue
-                
+
                 anim_curve = anim_curve_list[0]
-                
-                # 1. Remove redundancy (optimize curve)
-                self.remove_redundant_keys(anim_curve, threshold)
-                
-                # 2. Check if remaining curve is static
-                # Get all keyframe values
-                keyframes = cmds.keyframe(anim_curve, query=True, valueChange=True)
-                if not keyframes:
+
+                # Remove redundant keys; get back the remaining values to avoid a second query.
+                remaining = self.remove_redundant_keys(anim_curve, threshold)
+                if not remaining:
                     continue
-                
-                # Check if all values are essentially the same
-                min_val = min(keyframes)
-                max_val = max(keyframes)
-                
-                if (max_val - min_val) <= threshold:
-                    # Delete the animation curve (static channel)
+
+                if (max(remaining) - min(remaining)) <= threshold:
                     cmds.delete(anim_curve)
 
     def remove_redundant_keys(self, anim_curve, threshold=0.001):
         """
         Remove keys that have the same value as their neighbors.
+        Returns the post-cut value list (avoids re-querying in the caller).
         """
-        times = cmds.keyframe(anim_curve, query=True, timeChange=True)
+        times  = cmds.keyframe(anim_curve, query=True, timeChange=True)
         values = cmds.keyframe(anim_curve, query=True, valueChange=True)
-        
+
         if not times or len(times) < 3:
-            return
-            
-        count = len(times)
-        to_delete = []
-        
-        # Iterate from index 1 to count-2
-        for i in range(1, count - 1):
-            prev_val = values[i-1]
-            curr_val = values[i]
-            next_val = values[i+1]
-            
-            # Check if current roughly equals prev AND next
-            if (abs(curr_val - prev_val) <= threshold) and \
-               (abs(curr_val - next_val) <= threshold):
-                to_delete.append(times[i])
-        
+            return values or []
+
+        to_delete = [
+            times[i]
+            for i in range(1, len(times) - 1)
+            if abs(values[i] - values[i-1]) <= threshold
+            and abs(values[i] - values[i+1]) <= threshold
+        ]
+
         if to_delete:
-            cmds.cutKey(anim_curve, time=[(t,t) for t in to_delete])
+            cmds.cutKey(anim_curve, time=[(t, t) for t in to_delete])
+            # Return updated values after cuts.
+            return [v for i, v in enumerate(values) if times[i] not in to_delete]
+
+        return values
     
     @staticmethod
     def _locked_axes(node, prefix):
@@ -676,20 +634,22 @@ class SpaceSwitcher:
             if translate:
                 skip_t = self._locked_axes(source, "translate")
                 if len(skip_t) >= 3:
-                    cmds.warning(f"[SpaceSwitch] All translate channels unavailable on '{source}'; skipping pointConstraint.")
+                    cmds.warning(f"[SpaceSwitch] '{source}': all translate axes locked/driven — pointConstraint skipped.")
                 else:
                     kwargs = {"maintainOffset": maintain_offset}
                     if skip_t:
+                        cmds.warning(f"[SpaceSwitch] '{source}': skipping locked translate axes {skip_t}.")
                         kwargs["skip"] = skip_t
                     cmds.pointConstraint(locator, source, **kwargs)
 
             if rotate:
                 skip_r = self._locked_axes(source, "rotate")
                 if len(skip_r) >= 3:
-                    cmds.warning(f"[SpaceSwitch] All rotate channels unavailable on '{source}'; skipping orientConstraint.")
+                    cmds.warning(f"[SpaceSwitch] '{source}': all rotate axes locked/driven — orientConstraint skipped.")
                 else:
                     kwargs = {"maintainOffset": maintain_offset}
                     if skip_r:
+                        cmds.warning(f"[SpaceSwitch] '{source}': skipping locked rotate axes {skip_r}.")
                         kwargs["skip"] = skip_r
                     cmds.orientConstraint(locator, source, **kwargs)
     
@@ -776,17 +736,10 @@ class SpaceSwitcher:
         self.created_locators = []
     
     def _delete_constraints_on_node(self, node):
-        """Delete all constraints on a given node."""
-        constraint_types = [
-            "pointConstraint", "orientConstraint", "scaleConstraint",
-            "parentConstraint", "aimConstraint"
-        ]
-        
-        for ctype in constraint_types:
-            constraints = cmds.listRelatives(node, type=ctype) or []
-            for c in constraints:
-                if cmds.objExists(c):
-                    cmds.delete(c)
+        """Delete all constraints on a given node (single DG traversal)."""
+        found = cmds.listRelatives(node, children=True, type="constraint") or []
+        if found:
+            cmds.delete(*found)
 
 # ============================================================================
 # DASHBOARD UI  (PySide2 / Qt — cyberpunk theme)
@@ -853,6 +806,11 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             self.status_timer.stop()
             self.status_label.setText(msg)
 
+    def _status_done(self, msg, delay=3000):
+        """Set a completion status message then reset to READY after delay ms."""
+        self._set_status(msg)
+        QtCore.QTimer.singleShot(delay, lambda: self._set_status("◈  READY"))
+
     def _update_status_anim(self):
         self.baking_counter = (self.baking_counter + 1) % 4
         dots = "·" * self.baking_counter + "  " * (3 - self.baking_counter)
@@ -882,7 +840,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
         header_layout.setContentsMargins(12, 10, 12, 8)
         header_layout.setSpacing(2)
         title_lbl = QtWidgets.QLabel("◈  SPACE  SWITCH")
-        sub_lbl   = QtWidgets.QLabel("ANIMATOR DASHBOARD  v2.0")
+        sub_lbl   = QtWidgets.QLabel(f"ANIMATOR DASHBOARD  v{__version__}")
         header_layout.addWidget(title_lbl)
         header_layout.addWidget(sub_lbl)
         header.setStyleSheet("""
@@ -981,11 +939,10 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             self.mode_group.addButton(rb); r2.addWidget(rb)
         r2.addStretch()
 
-        self.rb_world.toggled.connect( lambda c: c and self._on_space_mode_change("world"))
-        self.rb_local.toggled.connect( lambda c: c and self._on_space_mode_change("local"))
-        self.rb_object.toggled.connect(lambda c: c and self._on_space_mode_change("object"))
-        self.rb_camera.toggled.connect(lambda c: c and self._on_space_mode_change("camera"))
-        self.rb_aim.toggled.connect(   lambda c: c and self._on_space_mode_change("aim"))
+        for rb, mode in [(self.rb_world, "world"), (self.rb_local, "local"),
+                         (self.rb_object, "object"), (self.rb_camera, "camera"),
+                         (self.rb_aim, "aim")]:
+            rb.toggled.connect(lambda checked, m=mode: checked and self._on_space_mode_change(m))
 
         self._sep(layout)
 
@@ -1053,7 +1010,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
         self.rot_order_combo = QtWidgets.QComboBox()
         for ro in ROTATION_ORDERS:
             self.rot_order_combo.addItem(ro.upper())
-        self.rot_order_combo.currentTextChanged.connect(self._on_rotation_order_change)
+        self.rot_order_combo.currentIndexChanged.connect(self._on_rotation_order_change)
         r2.addWidget(self.rot_order_combo)
         self.chk_auto_order = QtWidgets.QCheckBox("Auto-Detect")
         self.chk_auto_order.setChecked(True)
@@ -1120,13 +1077,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
         # Color swatches
         layout.addWidget(QtWidgets.QLabel("Locator Color:"))
         rc = self._hrow(layout, spacing=3)
-        color_swatches = [
-            ("red",    "#CC3333"), ("yellow", "#CCCC33"),
-            ("green",  "#33CC33"), ("blue",   "#3366CC"),
-            ("purple", "#9933CC"), ("white",  "#CCCCCC"),
-            ("cyan",   "#33CCCC"), ("orange", "#CC7722"),
-        ]
-        for name, hex_col in color_swatches:
+        for name, _idx, hex_col in LOCATOR_COLOR_SWATCHES:
             btn = QtWidgets.QPushButton()
             btn.setFixedSize(28, 22)
             btn.setToolTip(name.title())
@@ -1318,14 +1269,10 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
                     self.target_field.setText(cam)
                     self.target_object = cam
 
-    def _on_rotation_order_change(self, value):
-        try:
-            order_index = ROTATION_ORDERS.index(value.lower())
-        except ValueError:
-            return
-        self.settings["rotation_order"] = order_index
+    def _on_rotation_order_change(self, index):
+        self.settings["rotation_order"] = index
         if self.preview_locator and cmds.objExists(self.preview_locator):
-            cmds.setAttr(f"{self.preview_locator}.rotateOrder", order_index)
+            cmds.setAttr(f"{self.preview_locator}.rotateOrder", index)
 
     def _adj_scale(self, multiply=True):
         factor = self.scale_factor_field.value()
@@ -1342,20 +1289,19 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             return
         scale_mult = factor if multiply else 1.0 / factor
         for obj in target_objs:
-            if cmds.getAttr(f"{obj}.scaleX", lock=True):
-                continue
-            shapes = cmds.listRelatives(obj, shapes=True)
-            if shapes and cmds.nodeType(shapes[0]) == "locator":
-                shape = shapes[0]
-                sx = cmds.getAttr(f"{shape}.localScaleX")
-                new_s = max(0.001, sx * scale_mult)
-                cmds.setAttr(f"{shape}.localScaleX", new_s)
-                cmds.setAttr(f"{shape}.localScaleY", new_s)
-                cmds.setAttr(f"{shape}.localScaleZ", new_s)
-            else:
-                current_x = cmds.getAttr(f"{obj}.scaleX")
-                new_s = max(0.001, current_x * scale_mult)
-                cmds.scale(new_s, new_s, new_s, obj)
+            try:
+                shapes = cmds.listRelatives(obj, shapes=True)
+                if shapes and cmds.nodeType(shapes[0]) == "locator":
+                    shape = shapes[0]
+                    sx = cmds.getAttr(f"{shape}.localScaleX")
+                    new_s = max(0.001, sx * scale_mult)
+                    cmds.setAttr(f"{shape}.localScale", new_s, new_s, new_s, type="double3")
+                else:
+                    current_x = cmds.getAttr(f"{obj}.scaleX")
+                    new_s = max(0.001, current_x * scale_mult)
+                    cmds.scale(new_s, new_s, new_s, obj, absolute=True)
+            except Exception as e:
+                cmds.warning(f"[SpaceSwitch] Could not scale '{obj}': {e}")
 
     def _on_color_select(self, color_name):
         color_index = LOCATOR_COLORS.get(color_name, 17)
@@ -1376,20 +1322,24 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
                 cmds.setAttr(f"{shape}.overrideEnabled", 1)
                 cmds.setAttr(f"{shape}.overrideColor", color_index)
 
+    def _set_source_display(self, objs):
+        """Update source_objects and the source field label from a list of object names."""
+        self.source_objects = list(objs)
+        if len(objs) == 1:
+            text = objs[0]
+        elif len(objs) <= 3:
+            text = ", ".join(objs)
+        else:
+            text = f"{objs[0]} ... ({len(objs)} objects)"
+        self.source_field.setText(text)
+
     def _pick_object(self, field_type):
         sel = cmds.ls(selection=True)
         if not sel:
             cmds.warning("Nothing selected to pick.")
             return
         if field_type == "source":
-            self.source_objects = list(sel)
-            if len(sel) == 1:
-                display_text = sel[0]
-            elif len(sel) <= 3:
-                display_text = ", ".join(sel)
-            else:
-                display_text = f"{sel[0]} ... ({len(sel)} objects)"
-            self.source_field.setText(display_text)
+            self._set_source_display(sel)
         elif field_type == "target":
             self.target_object = sel[0]
             self.target_field.setText(sel[0])
@@ -1405,9 +1355,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
         loc = cmds.spaceLocator(name="_SS_preview_locator")[0]
         self.preview_locator = loc
         size = self.settings["locator_size"]
-        cmds.setAttr(f"{loc}.localScaleX", size)
-        cmds.setAttr(f"{loc}.localScaleY", size)
-        cmds.setAttr(f"{loc}.localScaleZ", size)
+        cmds.setAttr(f"{loc}.localScale", size, size, size, type="double3")
         shape = cmds.listRelatives(loc, shapes=True)[0]
         cmds.setAttr(f"{shape}.overrideEnabled", 1)
         cmds.setAttr(f"{shape}.overrideColor", self.settings["color_index"])
@@ -1426,14 +1374,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             sel = cmds.ls(selection=True)
             if sel:
                 objects_to_process = list(sel)
-                self.source_objects = list(sel)
-                if len(sel) == 1:
-                    display_text = sel[0]
-                elif len(sel) <= 3:
-                    display_text = ", ".join(sel)
-                else:
-                    display_text = f"{sel[0]} ... ({len(sel)} objects)"
-                self.source_field.setText(display_text)
+                self._set_source_display(sel)
 
         objects_to_process = [obj for obj in objects_to_process if cmds.objExists(obj)]
         if not objects_to_process:
@@ -1456,12 +1397,14 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
                 return False
             self.target_object = target_obj_name
 
+        # Cache playback range once — shared by all per-object calls below.
+        pb_start = cmds.playbackOptions(q=True, min=True)
+        pb_end   = cmds.playbackOptions(q=True, max=True)
+
         for obj in objects_to_process:
             rot_order = self.settings["rotation_order"]
             if self.settings["auto_best_order"]:
-                start = cmds.playbackOptions(q=True, min=True)
-                end   = cmds.playbackOptions(q=True, max=True)
-                best  = self.switcher.get_best_rotation_order(obj, start, end)
+                best = self.switcher.get_best_rotation_order(obj, pb_start, pb_end)
                 if best is not None:
                     rot_order = best
 
@@ -1500,9 +1443,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             target  = self.target_object
             t_rot   = self.settings["rotation_order"]
             if self.settings["auto_best_order"]:
-                start = cmds.playbackOptions(q=True, min=True)
-                end   = cmds.playbackOptions(q=True, max=True)
-                best  = self.switcher.get_best_rotation_order(target, start, end)
+                best = self.switcher.get_best_rotation_order(target, pb_start, pb_end)
                 if best is not None:
                     t_rot = best
 
@@ -1532,8 +1473,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
 
         top_groups = [data["top_group"] for data in self.switcher.created_locators]
         cmds.select(top_groups)
-        self._set_status(f"◈  CREATED {len(top_groups)} SETUP(S)")
-        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
+        self._status_done(f"◈  CREATED {len(top_groups)} SETUP(S)")
         cmds.inViewMessage(
             message=f"Created {len(top_groups)} locator setup(s). Ready for baking.",
             pos="midCenter", fade=True)
@@ -1600,8 +1540,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
 
         locators = [d["locator"] for d in self.switcher.created_locators]
         cmds.select(locators)
-        self._set_status(f"◈  BAKED {len(all_top_groups)} LOCATOR(S)")
-        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
+        self._status_done(f"◈  BAKED {len(all_top_groups)} LOCATOR(S)")
         cmds.inViewMessage(
             message=f"Baked {len(all_top_groups)} locator(s). Ready for adjustments.",
             pos="midCenter", fade=True)
@@ -1618,8 +1557,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             maintain_offset=False)
         sources = [data["source"] for data in self.switcher.created_locators]
         cmds.select(sources)
-        self._set_status("◈  REBUILD COMPLETE")
-        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
+        self._status_done("◈  REBUILD COMPLETE")
         cmds.inViewMessage(
             message="Stage 3 complete. Sources are now driven by locators.",
             pos="midCenter", fade=True)
@@ -1641,8 +1579,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
                           if cmds.objExists(d["top_group"])]
             if top_groups:
                 cmds.select(top_groups)
-        self._set_status("◈  SPACE SWITCH COMPLETE")
-        QtCore.QTimer.singleShot(4000, lambda: self._set_status("◈  READY"))
+        self._status_done("◈  SPACE SWITCH COMPLETE", delay=4000)
         cmds.inViewMessage(
             message="FULL SPACE SWITCH COMPLETE!  Offset locators selected.",
             pos="midCenter", fade=True)
@@ -1675,8 +1612,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
             threshold=self.settings["static_threshold"],
             delete_constraints=True)
         cmds.select(sources)
-        self._set_status("◈  SOURCES BAKED DOWN")
-        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
+        self._status_done("◈  SOURCES BAKED DOWN")
         cmds.inViewMessage(
             message="Sources baked down and filtered. Constraints removed.",
             pos="midCenter", fade=True)
@@ -1717,8 +1653,7 @@ class SpaceSwitchDashboard(QtWidgets.QWidget):
         self.switcher.cleanup(delete_constraints_first=True)
         if cmds.objExists("_SS_preview_locator"):
             cmds.delete("_SS_preview_locator")
-        self._set_status("◈  CLEANUP COMPLETE")
-        QtCore.QTimer.singleShot(3000, lambda: self._set_status("◈  READY"))
+        self._status_done("◈  CLEANUP COMPLETE")
         cmds.inViewMessage(
             message="Cleanup complete. Layers, constraints, and locators deleted.",
             pos="midCenter", fade=True)
